@@ -1,0 +1,8 @@
+# 智巡 AI 识别服务 —— 本地配置（不进代码库/不提交 git）
+# 复制本文件为 config.local.json 并填写你的 Provider 信息
+{
+  "base_url": "https://your-provider.example.com/v1",
+  "api_key": "sk-your-key-here",
+  "model": "agnes-3.0-flash",
+  "port": 8788
+}
