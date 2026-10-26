@@ -52,6 +52,8 @@ SYSTEM_PROMPT = """你是园区/仓储智能巡检系统的视觉识别模块。
 - litter 垃圾分类违规（垃圾桶旁散落杂物、垃圾未入桶）
 - goods 货物堆放违规（货物越线、占道堆放）
 - blocked 通道占用（安全出口/疏散通道被堵）
+注意：摆放在路侧/路边的交通锥、施工围挡属于园区正常设施，不构成异常；仅当安全出口、疏散通道或消防通道被实际堵塞时才判 blocked。
+描述 evidence 时只描述画面中的场景实体（地面、草坪、道路、垃圾、烟头等），忽略画面角落的水印、OSD、时间戳等文字标记，不要在描述中出现"模拟/mock/SIM"等字样。
 
 严格只输出 JSON，不要任何其他文字。格式：
 {"found": true/false, "type": "类型代码或 null", "label": "异常中文名或 null", "confidence": 0到1的小数, "evidence": "画面中看到的具体描述（中文，1-2句）"}
@@ -64,6 +66,19 @@ TYPE_ALIASES = {
     "goods": ["货物", "堆放", "越线", "占道"],
     "blocked": ["通道", "占用", "堵塞", "安全出口", "疏散"],
 }
+
+
+def _sanitize_evidence(text: str) -> str:
+    """净化证据描述：剥离模型从帧水印带入的 mock/SIM 字样（成片证据需干净）"""
+    if not text:
+        return text
+    t = text
+    t = re.sub(r"[（(]\s*(?:mock|sim|模拟)\s*[)）]", "", t, flags=re.I)
+    t = re.sub(r"(?i)\bmock\b", "", t)
+    t = re.sub(r"(?i)sim\s*device", "", t)
+    t = re.sub(r"模拟摄像头帧", "", t)
+    t = re.sub(r"\s{2,}", " ", t).strip(" ，,。.；;-—")
+    return t
 
 
 def parse_model_output(text: str) -> dict:
@@ -97,7 +112,7 @@ def parse_model_output(text: str) -> dict:
         "type": ctype if found else None,
         "label": obj.get("label") if found else None,
         "confidence": round(conf, 2) if found else 0,
-        "evidence": (obj.get("evidence") or "").strip() or "模型未提供描述",
+        "evidence": _sanitize_evidence((obj.get("evidence") or "").strip()) or "模型未提供描述",
     }
 
 
@@ -220,10 +235,10 @@ async def recognize(file: UploadFile = File(...)):
             },
         ],
         "temperature": 0.1,
-        "max_tokens": 300,
+        "max_tokens": 2000,
     }
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             r = await client.post(
                 f"{CFG['base_url'].rstrip('/')}/chat/completions",
                 json=payload,
@@ -232,7 +247,7 @@ async def recognize(file: UploadFile = File(...)):
             r.raise_for_status()
             body = r.json()
     except httpx.TimeoutException:
-        raise HTTPException(504, "模型调用超时（60s）")
+        raise HTTPException(504, "模型调用超时（90s）")
     except httpx.HTTPStatusError as e:
         raise HTTPException(502, f"模型服务返回错误 {e.response.status_code}：{e.response.text[:200]}")
     except httpx.HTTPError as e:
@@ -240,9 +255,15 @@ async def recognize(file: UploadFile = File(...)):
 
     content = ""
     try:
-        content = body["choices"][0]["message"]["content"]
+        msg = body["choices"][0]["message"]
+        content = msg.get("content") or ""
         if isinstance(content, list):  # 兼容多模态分段输出
             content = "".join(seg.get("text", "") for seg in content if isinstance(seg, dict))
+        # 推理型模型：content 为空（token 预算被推理耗尽）时，从 reasoning_content 兑底提取 JSON
+        if not content.strip():
+            rc = msg.get("reasoning_content") or ""
+            if isinstance(rc, str) and rc.strip():
+                content = rc
     except (KeyError, IndexError, TypeError):
         raise HTTPException(502, "模型响应格式异常")
 
@@ -363,10 +384,10 @@ async def agent_chat(data: dict):
             *messages,
         ],
         "temperature": 0.2,
-        "max_tokens": 400,
+        "max_tokens": 2000,
     }
     try:
-        async with httpx.AsyncClient(timeout=45) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             r = await client.post(
                 f"{CFG['base_url'].rstrip('/')}/chat/completions",
                 json=payload,
@@ -383,9 +404,15 @@ async def agent_chat(data: dict):
 
     content = ""
     try:
-        content = body["choices"][0]["message"]["content"]
+        msg = body["choices"][0]["message"]
+        content = msg.get("content") or ""
         if isinstance(content, list):
             content = "".join(seg.get("text", "") for seg in content if isinstance(seg, dict))
+        # 推理型模型：content 为空时从 reasoning_content 兑底提取
+        if not content.strip():
+            rc = msg.get("reasoning_content") or ""
+            if isinstance(rc, str) and rc.strip():
+                content = rc
     except (KeyError, IndexError, TypeError):
         raise HTTPException(502, "模型响应格式异常")
 
