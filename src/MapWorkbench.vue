@@ -1,30 +1,43 @@
 <template>
   <div class="workbench">
-    <!-- 左：工具面板 -->
+    <!-- 顶条：场景信息 + 主操作（一行放下，免滚动） -->
+    <div class="wb-topbar">
+      <div class="wb-field">
+        <span class="wb-k">场景名称</span>
+        <el-input v-model="draft.name" size="small" placeholder="如：教学楼一层" style="width: 176px" />
+      </div>
+      <div class="wb-field">
+        <span class="wb-k">场地</span>
+        <el-input-number v-model="draft.world.w" :min="10" :max="200" size="small" controls-position="right" style="width: 88px" />
+        <span class="wb-x">×</span>
+        <el-input-number v-model="draft.world.h" :min="10" :max="200" size="small" controls-position="right" style="width: 88px" />
+        <span class="wb-unit">米</span>
+      </div>
+      <label class="wb-file-btn">
+        {{ draft.bg.image ? '更换底图' : '上传底图' }}
+        <input type="file" accept="image/*" hidden @change="onBgFile" />
+      </label>
+      <el-button v-if="draft.bg.image" size="small" text type="danger" @click="draft.bg.image = null">移除底图</el-button>
+      <div class="wb-top-actions">
+        <el-button type="primary" @click="save">💾 保存场景</el-button>
+        <el-dropdown @command="onMoreCommand">
+          <el-button>更多 ▾</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="export">导出 JSON</el-dropdown-item>
+              <el-dropdown-item command="import">导入 JSON</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <input ref="importInputRef" type="file" accept=".json,application/json" hidden @change="importJson" />
+      </div>
+    </div>
+
+    <div class="wb-body">
+    <!-- 左：绘制工具 -->
     <aside class="wb-side">
       <el-card class="wb-card">
-        <template #header><b>① 场景信息</b></template>
-        <div class="wb-row"><span class="wb-k">场景名称</span>
-          <el-input v-model="draft.name" size="small" placeholder="如：教学楼一层" />
-        </div>
-        <div class="wb-row"><span class="wb-k">场地宽 (m)</span>
-          <el-input-number v-model="draft.world.w" :min="10" :max="200" size="small" controls-position="right" />
-        </div>
-        <div class="wb-row"><span class="wb-k">场地高 (m)</span>
-          <el-input-number v-model="draft.world.h" :min="10" :max="200" size="small" controls-position="right" />
-        </div>
-        <div class="wb-row"><span class="wb-k">底图图片</span>
-          <label class="wb-file-btn">
-            {{ draft.bg.image ? '更换底图' : '上传底图' }}
-            <input type="file" accept="image/*" hidden @change="onBgFile" />
-          </label>
-          <el-button v-if="draft.bg.image" size="small" text type="danger" @click="draft.bg.image = null">移除</el-button>
-        </div>
-        <div class="wb-tip">上传场地平面图或照片作描点参考（自动压缩存储）</div>
-      </el-card>
-
-      <el-card class="wb-card">
-        <template #header><b>② 绘制</b></template>
+        <template #header><b>绘制模式</b></template>
         <div class="wb-modes">
           <el-check-tag v-for="m in MODES" :key="m.id" :checked="mode === m.id" @change="setMode(m.id)">{{ m.label }}</el-check-tag>
         </div>
@@ -40,15 +53,57 @@
               <el-option v-for="z in draft.zones" :key="z.id" :value="z.id" :label="z.name" />
             </el-select>
           </div>
-          <el-button size="small" type="primary" plain :disabled="!routeDraft.length" @click="finishRoute" style="width:100%; margin-top:8px">
+          <el-button size="small" type="primary" plain :disabled="!routeDraft.length" @click="finishRoute" style="width:100%">
             完成路线（已描 {{ routeDraft.length }} 点）
           </el-button>
         </template>
         <div class="wb-hint">💡 {{ hint }}</div>
       </el-card>
 
-      <el-card class="wb-card" v-if="selectedObj">
-        <template #header><b>选中：{{ selectedTitle }}</b></template>
+      <el-card class="wb-card">
+        <template #header><b>清单</b><span class="wb-count">{{ draft.zones.length }} 分区 · {{ draft.devices.length }} 设备 · {{ routeCount }} 路线</span></template>
+        <div class="wb-list">
+          <div class="wb-list-item" v-for="z in draft.zones" :key="z.id">
+            <span @click="selectZone(z.id)">🟦 {{ z.name }}</span>
+            <span class="wb-list-sub">
+              {{ (draft.routes[z.id]?.length ?? 0) }} 点
+              <el-button v-if="draft.routes[z.id]?.length" size="small" text type="danger" @click="draft.routes[z.id] = []">清路线</el-button>
+            </span>
+          </div>
+          <div class="wb-list-empty" v-if="!draft.zones.length">还没有分区，用「分区」模式拖拽画一个</div>
+        </div>
+        <div class="wb-row" style="margin-top:4px">
+          <span class="wb-k">载入现有</span>
+          <el-select v-model="loadFromId" size="small" style="flex:1" placeholder="选择场景载入编辑">
+            <el-option v-for="s in loadScenes" :key="s.id" :value="s.id" :label="s.name" />
+          </el-select>
+          <el-button size="small" :disabled="!loadFromId" @click="loadFrom">载入</el-button>
+        </div>
+      </el-card>
+
+      <el-card class="wb-card">
+        <template #header><b>可识别异常</b></template>
+        <div class="wb-types">
+          <el-check-tag v-for="t in allTypes" :key="t.type"
+            :checked="checkedTypes.includes(t.type)" @change="toggleType(t.type)">{{ t.label }}</el-check-tag>
+        </div>
+        <div class="wb-tip">点选本场景需要 AI 识别的异常类型</div>
+      </el-card>
+    </aside>
+
+    <!-- 右：编辑画布 -->
+    <section class="wb-map-wrap">
+      <canvas ref="canvasRef" :width="cw" :height="ch"
+        @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp"
+        @mouseleave="onMouseLeave" @dblclick="onDblClick" @contextmenu.prevent="onContextMenu" />
+      <div class="wb-coord">{{ hoverText }}</div>
+
+      <!-- 选中对象浮层（悬浮画布左上角，不占侧栏高度，侧栏永不滚动） -->
+      <div class="wb-sel-float" v-if="selectedObj">
+        <div class="wb-sel-head">
+          <b>选中：{{ selectedTitle }}</b>
+          <span class="wb-sel-close" title="取消选择" @click="deselect">✕</span>
+        </div>
         <template v-if="selected.kind === 'zone'">
           <div class="wb-row"><span class="wb-k">分区名称</span>
             <el-input v-model="selectedObj.name" size="small" />
@@ -64,64 +119,18 @@
         <template v-else>
           <div class="wb-tip">停靠点：({{ selectedObj.x.toFixed(1) }}, {{ selectedObj.y.toFixed(1) }}) —— 设备出发与补给位置</div>
         </template>
-        <el-button size="small" type="danger" plain @click="deleteSelected" style="width:100%; margin-top:8px">删除选中</el-button>
-      </el-card>
-
-      <el-card class="wb-card">
-        <template #header><b>③ 清单</b><span class="wb-count">{{ draft.zones.length }} 分区 · {{ draft.devices.length }} 设备 · {{ routeCount }} 路线</span></template>
-        <div class="wb-list">
-          <div class="wb-list-item" v-for="z in draft.zones" :key="z.id">
-            <span @click="selectZone(z.id)">🟦 {{ z.name }}</span>
-            <span class="wb-list-sub">
-              {{ (draft.routes[z.id]?.length ?? 0) }} 点
-              <el-button v-if="draft.routes[z.id]?.length" size="small" text type="danger" @click="draft.routes[z.id] = []">清路线</el-button>
-            </span>
-          </div>
-          <div class="wb-list-empty" v-if="!draft.zones.length">还没有分区，用「分区」模式拖拽画一个</div>
-        </div>
-      </el-card>
-
-      <el-card class="wb-card">
-        <template #header><b>④ 可识别异常</b></template>
-        <div class="wb-types">
-          <el-check-tag v-for="t in allTypes" :key="t.type"
-            :checked="checkedTypes.includes(t.type)" @change="toggleType(t.type)">{{ t.label }}</el-check-tag>
-        </div>
-        <div class="wb-tip">点选本场景需要 AI 识别的异常类型</div>
-      </el-card>
-
-      <el-card class="wb-card">
-        <template #header><b>⑤ 场景管理</b></template>
-        <div class="wb-actions">
-          <el-button type="primary" @click="save">💾 保存场景</el-button>
-          <el-button @click="exportJson">导出 JSON</el-button>
-          <label class="wb-file-btn">导入 JSON<input type="file" accept=".json,application/json" hidden @change="importJson" /></label>
-        </div>
-        <div class="wb-row" style="margin-top:10px"><span class="wb-k">载入现有</span>
-          <el-select v-model="loadFromId" size="small" style="flex:1" placeholder="选择场景载入编辑">
-            <el-option v-for="s in loadScenes" :key="s.id" :value="s.id" :label="s.name" />
-          </el-select>
-          <el-button size="small" :disabled="!loadFromId" @click="loadFrom">载入</el-button>
-        </div>
-        <div class="wb-tip">载入内置场景会另存为副本，不影响原场景</div>
-      </el-card>
-    </aside>
-
-    <!-- 右：编辑画布 -->
-    <section class="wb-map-wrap">
-      <canvas ref="canvasRef" :width="cw" :height="ch"
-        @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp"
-        @mouseleave="onMouseLeave" @dblclick="onDblClick" @contextmenu.prevent="onContextMenu" />
-      <div class="wb-coord">{{ hoverText }}</div>
+        <el-button size="small" type="danger" plain @click="deleteSelected" style="width:100%">删除选中</el-button>
+      </div>
     </section>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
-  ElButton, ElCard, ElCheckTag, ElInput, ElInputNumber,
-  ElMessage, ElOption, ElSelect,
+  ElButton, ElCard, ElCheckTag, ElDropdown, ElDropdownItem, ElDropdownMenu,
+  ElInput, ElInputNumber, ElMessage, ElOption, ElSelect,
 } from 'element-plus'
 import {
   ANOMALY_TYPE_META, DEFAULT_DEVICE_KINDS, kindOf, validateScene,
@@ -197,6 +206,11 @@ const dragStart = ref(null)   // 分区拖拽起点（世界坐标）
 const dragCur = ref(null)     // 拖拽当前点
 const routeDraft = ref([])    // 正在描的路线点 [[x,y],...]
 const selected = ref(null)    // {kind:'zone'|'device'|'dock', index}
+
+function deselect() {
+  selected.value = null
+  draw()
+}
 
 const selectedObj = computed(() => {
   const s = selected.value
@@ -624,11 +638,30 @@ function loadFrom() {
   applyDraft(copy)
   ElMessage.success(`已载入「${s.name}」${BUILTIN_SCENES.some(b => b.id === s.id) ? '（副本，保存不影响原场景）' : ''}`)
 }
+
+// 顶条「更多」下拉：导出 / 导入
+const importInputRef = ref(null)
+function onMoreCommand(cmd) {
+  if (cmd === 'export') exportJson()
+  else if (cmd === 'import') importInputRef.value?.click()
+}
 </script>
 
 <style scoped>
-.workbench { display: flex; gap: 18px; align-items: stretch; height: calc(100vh - 238px); min-height: 520px; }
-.wb-side { width: 320px; flex: none; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-right: 4px; }
+.workbench { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 238px); min-height: 520px; }
+
+/* 顶条：场景信息 + 主操作，一行放下 */
+.wb-topbar {
+  flex: none; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 10px 16px; border-radius: 8px; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+.wb-field { display: flex; align-items: center; gap: 8px; }
+.wb-x { color: #909399; font-size: 12px; }
+.wb-unit { color: #909399; font-size: 12px; }
+.wb-top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+.wb-body { flex: 1; display: flex; gap: 16px; align-items: stretch; min-height: 0; }
+.wb-side { width: 360px; flex: none; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-right: 4px; }
 .wb-card :deep(.el-card__body) { display: flex; flex-direction: column; gap: 8px; }
 .wb-row { display: flex; align-items: center; gap: 8px; }
 .wb-k { font-size: 13px; color: #909399; flex: none; width: 64px; }
@@ -637,7 +670,7 @@ function loadFrom() {
 .wb-modes { display: flex; flex-wrap: wrap; gap: 6px; }
 .wb-types { display: flex; flex-wrap: wrap; gap: 6px; }
 .wb-count { margin-left: auto; font-size: 12px; color: #909399; font-weight: normal; }
-.wb-list { max-height: 160px; overflow-y: auto; }
+.wb-list { max-height: 180px; overflow-y: auto; }
 .wb-list-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 2px; font-size: 13px; cursor: pointer; border-bottom: 1px dashed #f0f0f0; }
 .wb-list-item:hover { color: #409eff; }
 .wb-list-sub { color: #909399; font-size: 12px; display: flex; gap: 4px; align-items: center; }
@@ -649,18 +682,34 @@ function loadFrom() {
 .wb-map-wrap canvas { border-radius: 8px; cursor: crosshair; display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; }
 .wb-coord { position: absolute; right: 18px; bottom: 16px; background: rgba(0,0,0,0.65); color: #fff; font-size: 12px; padding: 3px 10px; border-radius: 10px; }
 
-/* 窄窗口降级单列 */
+/* 选中对象浮层：悬浮画布左上角 */
+.wb-sel-float {
+  position: absolute; left: 22px; top: 22px; width: 272px; z-index: 5;
+  background: #fff; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.16);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.wb-sel-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: #303133; }
+.wb-sel-close { cursor: pointer; color: #909399; font-size: 15px; line-height: 1; padding: 2px 6px; border-radius: 4px; user-select: none; }
+.wb-sel-close:hover { color: #f56c6c; background: #fef0f0; }
+
+/* 窄窗口降级：顶条换行，主体单列 */
 @media (max-width: 1180px) {
-  .workbench { flex-direction: column; min-height: 0; height: auto; }
+  .workbench { height: auto; min-height: 0; }
+  .wb-top-actions { margin-left: 0; }
+  .wb-body { flex-direction: column; }
   .wb-side { width: auto; overflow-y: visible; }
   .wb-map-wrap canvas { max-height: none; }
 }
 
 /* 深色主题 */
+.app[data-theme='dark'] .wb-topbar { background: #101d2d; box-shadow: 0 0 24px rgba(64,158,255,0.15); }
 .app[data-theme='dark'] .wb-map-wrap { background: #101d2d; box-shadow: 0 0 24px rgba(64,158,255,0.15); }
+.app[data-theme='dark'] .wb-sel-float { background: #0f1b2a; border: 1px solid #1d3350; box-shadow: 0 8px 30px rgba(0,0,0,0.55); }
+.app[data-theme='dark'] .wb-sel-head { color: #d7e6f5; }
 .app[data-theme='dark'] .wb-hint { background: #14273d; }
 .app[data-theme='dark'] .wb-tip, .app[data-theme='dark'] .wb-k,
-.app[data-theme='dark'] .wb-count, .app[data-theme='dark'] .wb-list-sub { color: #5d7a99; }
+.app[data-theme='dark'] .wb-count, .app[data-theme='dark'] .wb-list-sub,
+.app[data-theme='dark'] .wb-x, .app[data-theme='dark'] .wb-unit { color: #5d7a99; }
 .app[data-theme='dark'] .wb-list-item { border-bottom-color: #14273d; }
 .app[data-theme='dark'] .wb-file-btn { color: #9fb8d4; border-color: #1d3350; }
 </style>
