@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  frontend-build:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 生产构建
+        run: pnpm build
+
+  backend-test:
+    name: 后端验证（识别 / 报告 / 工单 / 助手 / 配置）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: 安装依赖
+        run: uv sync
+      - name: 识别链路验证
+        run: uv run python test_recognize.py
+      - name: 报告导出验证
+        run: uv run python test_report_pdf.py
+      - name: 工单 PDF 验证
+        run: uv run python test_handle_pdf.py
+      - name: AI 助手接口验证
+        run: uv run python test_agent.py
+      - name: 模型配置 API 验证
+        run: uv run python test_config_api.py

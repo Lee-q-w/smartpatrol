@@ -1,5 +1,8 @@
 # 智巡 SmartPatrol
 
+[![CI](https://github.com/Lee-q-w/smartpatrol/actions/workflows/ci.yml/badge.svg)](https://github.com/Lee-q-w/smartpatrol/actions/workflows/ci.yml)
+[![在线演示](https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E6%BC%94%E7%A4%BA-GitHub%20Pages-2D5F8A)](https://lee-q-w.github.io/smartpatrol/)
+
 > 虚实结合的园区智能巡检平台 —— 仿真、回放、真机三数据源统一协议，发现 → 处置 → 报告全流程闭环。
 
 第九届传智杯 AI WEB 网页开发挑战赛参赛作品 · aptapt 团队 · 三江学院

@@ -1,13 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>smartpatrol-app</title>
+    <title>智巡 SmartPatrol · 园区智能巡检平台</title>
+    <style>
+      /* JS 下载期的加载占位（应用挂载后自动替换，避免低速网络下白屏） */
+      #app:empty::after {
+        content: '';
+        position: fixed; inset: 0;
+        background: linear-gradient(135deg, #0a1626 0%, #12294a 45%, #1e4a78 100%);
+      }
+      #app:empty::before {
+        content: '智巡 SmartPatrol 加载中…';
+        position: fixed; left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        color: rgba(255,255,255,.85);
+        font: 16px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+        letter-spacing: 2px;
+        z-index: 1;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="./src/main.js"></script>
   </body>
 </html>
