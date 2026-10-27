@@ -32,6 +32,8 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
+      - name: 安装中文字体（报告 PDF 渲染需要）
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
       - name: 安装 uv
         uses: astral-sh/setup-uv@v5
         with:

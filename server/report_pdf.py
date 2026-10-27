@@ -29,6 +29,9 @@ def register_cn_font() -> None:
         ("SimHei", r"C:\Windows\Fonts\simhei.ttf"),
         ("MSYaHei", r"C:\Windows\Fonts\msyh.ttc"),
         ("SimSun", r"C:\Windows\Fonts\simsun.ttc"),
+        # Linux（GitHub Actions / Noto CJK / 文泉驿）
+        ("NotoCJK", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        ("WenQuanYi", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
     ]
     for name, path in candidates:
         try:
