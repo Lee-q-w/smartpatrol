@@ -29,9 +29,10 @@ def register_cn_font() -> None:
         ("SimHei", r"C:\Windows\Fonts\simhei.ttf"),
         ("MSYaHei", r"C:\Windows\Fonts\msyh.ttc"),
         ("SimSun", r"C:\Windows\Fonts\simsun.ttc"),
-        # Linux（GitHub Actions / Noto CJK / 文泉驿）
-        ("NotoCJK", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        # Linux（GitHub Actions）：文泉驿正黑为 TrueType 轮廓，reportlab 可直接注册；
+        # Noto CJK 官方包是 CFF(OTTO) 轮廓，reportlab TTFont 不支持，仅作兜底
         ("WenQuanYi", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+        ("NotoCJK", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
     ]
     for name, path in candidates:
         try:

@@ -33,20 +33,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 安装中文字体（报告 PDF 渲染需要）
-        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk fonts-wqy-zenhei
+      - name: 字体诊断（→ Step Summary）
+        run: |
+          {
+            echo "## 字体诊断"
+            echo '### 中文字体文件'
+            ls -l /usr/share/fonts/opentype/noto/ 2>/dev/null || echo "noto 目录不存在"
+            ls -l /usr/share/fonts/truetype/wqy/ 2>/dev/null || echo "wqy 目录不存在"
+            echo '### fc-list 中文'
+            fc-list :lang=zh 2>/dev/null | head -8 || echo "fc-list 不可用"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: 安装 uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       - name: 安装依赖
         run: uv sync
+      - name: 库版本诊断（→ Step Summary）
+        run: |
+          {
+            echo "## 库版本"
+            uv run python -c "import reportlab, PIL; print('reportlab', reportlab.Version); print('Pillow', PIL.__version__)"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: 识别链路验证
-        run: uv run python test_recognize.py
+        run: |
+          set -o pipefail
+          uv run python test_recognize.py 2>&1 | tee /tmp/t1.log || { { echo '## test_recognize 失败'; tail -30 /tmp/t1.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: 报告导出验证
-        run: uv run python test_report_pdf.py
+        run: |
+          set -o pipefail
+          uv run python test_report_pdf.py 2>&1 | tee /tmp/t2.log || { { echo '## test_report_pdf 失败'; tail -40 /tmp/t2.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: 工单 PDF 验证
-        run: uv run python test_handle_pdf.py
+        run: |
+          set -o pipefail
+          uv run python test_handle_pdf.py 2>&1 | tee /tmp/t3.log || { { echo '## test_handle_pdf 失败'; tail -40 /tmp/t3.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: AI 助手接口验证
-        run: uv run python test_agent.py
+        run: |
+          set -o pipefail
+          uv run python test_agent.py 2>&1 | tee /tmp/t4.log || { { echo '## test_agent 失败'; tail -30 /tmp/t4.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: 模型配置 API 验证
-        run: uv run python test_config_api.py
+        run: |
+          set -o pipefail
+          uv run python test_config_api.py 2>&1 | tee /tmp/t5.log || { { echo '## test_config_api 失败'; tail -30 /tmp/t5.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
