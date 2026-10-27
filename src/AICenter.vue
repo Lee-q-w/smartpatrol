@@ -131,7 +131,9 @@ const previewShown = ref(false)
 
 const backendOk = ref(null)   // null=未探测 true/false
 const backendText = computed(() =>
-  backendOk.value === null ? '后端探测中…' : backendOk.value ? '识别服务在线' : '识别服务离线（启动 server 后可用）')
+  backendOk.value === null ? '后端探测中…' : backendOk.value
+    ? '识别服务在线'
+    : '在线静态演示：AI 识别需本地运行后端（见 README），AI 助手已自动降级为离线规则模式')
 
 // ---------- 模型配置（评审自己填 Key，开箱即用） ----------
 const modelCfg = ref({ configured: null, baseUrl: '', model: '', apiKeyMasked: '' })
@@ -221,7 +223,10 @@ async function recognize() {
     if (data.found) ElMessage.success(`识别到：${data.label}（把握 ${Math.round(data.confidence * 100)}%）`)
     else ElMessage.success('识别完成：未发现异常')
   } catch (e) {
-    ElMessage.error('识别失败：' + e.message)
+    const networkFail = /fetch|network|timeout/i.test(String(e?.name) + String(e?.message))
+    ElMessage.error(networkFail
+      ? '当前为在线静态演示，AI 识别需后端服务——完整 AI 演示请观看演示视频，或按 README 本地部署体验'
+      : '识别失败：' + e.message)
   } finally {
     loading.value = false
   }
