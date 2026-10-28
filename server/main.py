@@ -37,12 +37,13 @@ CFG = load_config()
 
 app = FastAPI(title="智巡 AI 识别服务", version="1.0")
 
-# 本地开发跨域（vite dev 5199 / preview 4173）
+# 本地开发跨域（vite dev 5199 / preview 4173 / GitHub Pages 在线演示）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173", "http://localhost:5199", "http://127.0.0.1:5199",
         "http://localhost:4173", "http://127.0.0.1:4173",   # vite preview（生产包冒烟）
+        "https://lee-q-w.github.io",                        # 在线演示：评审本地起后端即可用 AI/PDF 全功能
     ],
     allow_methods=["*"],
     allow_headers=["*"],
