@@ -62,20 +62,20 @@ export const ROUTE_ZONE_C = [
 export const FINDINGS = [
   { type: 'cigarette', label: '未熄烟头', place: 'bench-3 长椅旁', conf: 0.98, level: 'high',
     evidence: '橙色亮点 2 处（长椅步道边缘 + 步道中段），无人机俯拍复核确认',
-    frameRef: '/frames/cigarette.jpg', frameTitle: 'AGV 近景检查帧（bench-3）',
+    frameRef: './frames/cigarette.jpg', frameTitle: 'AGV 近景检查帧（bench-3）',
     frameDesc: '拍照时巡逻车位于长椅东南侧，画面中长椅旁步道上可见两处橙红色亮点。' },
   { type: 'dry', label: '植被缺水', place: 'lawn-sw 草坪', conf: 0.95, level: 'high',
     evidence: '草坪内黄褐斑驳斑块（占 1/4-1/3），轮廓不规则、边缘渐变，复核确认',
-    frameRef: '/frames/dry.jpg', frameTitle: 'AGV 近景检查帧（bench-3 方向）',
+    frameRef: './frames/dry.jpg', frameTitle: 'AGV 近景检查帧（bench-3 方向）',
     frameDesc: '画面左侧草坪内部出现成片黄褐色斑块，与周围饱和绿色形成对比。' },
   { type: 'litter', label: '垃圾分类违规', place: 'bin-3 桶旁', conf: 0.90, level: 'medium',
     evidence: '桶旁橙/黄/绿杂色散落小块，俯拍复核确认',
-    frameRef: '/frames/litter.jpg', frameTitle: 'AGV 近景检查帧（bin-3）',
+    frameRef: './frames/litter.jpg', frameTitle: 'AGV 近景检查帧（bin-3）',
     frameDesc: '垃圾桶位旁地面散落橙、黄、绿多色小块，非单一件落物。' },
 ]
 
-// 无人机俯拍复核帧（供证据弹窗第二张图）
-export const DRONE_FRAME = { ref: '/frames/drone.jpg', title: '无人机俯拍复核帧（8 米高度）' }
+// 无人机俯拍复核帧（供证据弹窗第二张图）；相对路径适配 Pages 子路径部署
+export const DRONE_FRAME = { ref: './frames/drone.jpg', title: '无人机俯拍复核帧（8 米高度）' }
 
 // 各分区巡查点位（定点详查/环视检查用）：{ placeId, x, y, check: 检查项, label: 通俗名 }
 export const ZONE_POINTS = {
