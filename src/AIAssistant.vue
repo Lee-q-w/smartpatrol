@@ -1,3 +1,9 @@
+<!-- AIAssistant.vue —— AI 巡检助手「小巡」（右下角悬浮球 + 对话面板）
+     职责：普通话下指令即执行——对话经后端 /api/agent/chat 由大模型做意图解析，
+     返回结构化 actions（动作白名单：patrol / switch_scene / switch_mode /
+     export_report / mark_resolved / recheck），emit('action') 上抛给 App 执行；
+     后端不可用时自动降级本地规则引擎（离线优先，演示永不掉线），
+     首次降级会引导配置模型 Key。 -->
 <template>
   <div class="assistant">
     <transition name="pop">
@@ -74,6 +80,8 @@ async function scrollToBottom() {
   if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
 }
 
+// send()：发送一条用户消息。历史窗口取最近 8 条（含本轮）连同平台上下文
+// 一起交给模型；非 200 或网络失败一律走本地规则降级
 async function send(preset) {
   const text = String(preset ?? input.value).trim()
   if (!text || busy.value) return
@@ -123,6 +131,8 @@ function reply(text, actions) {
 }
 
 // ---------- 本地规则引擎 ----------
+// 意图解析顺序：查询直答 → 场景切换 → 数据源切换 → 巡逻（全面/分区/方式）
+// → 报告导出 → 批量处置 → 无人机复核；同一句话可复合命中多个动作
 function ruleReply(t, ctx) {
   const actions = []
   const parts = []

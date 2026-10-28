@@ -1,3 +1,8 @@
+<!-- EvidenceDialog.vue —— 异常证据详情弹窗
+     职责：以只读视角展示单条异常的完整证据链：
+     近景照片（frameRef）+ 无人机俯拍复核帧 + 元信息（类型/位置/把握程度/复核状态/处置进度/证据描述）。
+     数据源：父组件传入的 anomaly 对象（三数据源统一协议产出），
+     通过 defineExpose({ open }) 供父组件以 ref 方式唤起。 -->
 <template>
   <el-dialog v-model="visible" :title="anomaly ? `${anomaly.label} — 证据详情` : '证据详情'" width="720px" align-center>
     <div class="evi-body" v-if="anomaly">
@@ -48,12 +53,16 @@ import { DRONE_FRAME } from './parkData.js'
 const props = defineProps({ anomaly: { type: Object, default: null } })
 const visible = ref(false)
 
+// 已复核确认且非真机实拍：可展示无人机俯拍帧做交叉确认（真机实拍无对应俯拍数据）
 const showDroneFrame = computed(() => props.anomaly?.stage === 'confirmed' && props.anomaly?.source !== 'real-ai')
+// 复核/工单状态的中文标签与标签色映射（detected→灰 / rechecking→黄 / confirmed→红）
 const stageName = computed(() => ({ detected: '初步判断（待复核）', rechecking: '无人机复核中', confirmed: '已复核确认' }[props.anomaly?.stage]))
 const ticketName = computed(() => ({ pending: '未处理', processing: '处理中', resolved: '已处置完成' }[props.anomaly?.handle?.status] ?? '未处理'))
 const ticketType = computed(() => ({ pending: 'warning', processing: 'primary', resolved: 'success' }[props.anomaly?.handle?.status] ?? 'warning'))
 
+// open()：供父组件通过 ref 调用唤起弹窗
 function open() { visible.value = true }
+// fmtPos()：世界坐标保留一位小数展示
 function fmtPos(p) { return `(${p.x.toFixed(1)}, ${p.y.toFixed(1)})` }
 defineExpose({ open })
 </script>

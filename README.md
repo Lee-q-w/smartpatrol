@@ -118,7 +118,7 @@ AI 功能通过 OpenAI 兼容接口对接大模型。配置方式二选一：
 | 前端 | `package.json` / `pnpm-lock.yaml` | vue 3、element-plus、vite |
 | 后端 | `server/pyproject.toml` / `server/uv.lock` | fastapi、uvicorn、httpx、reportlab、pillow、websockets |
 
-后端单测：`cd server && uv run pytest`（识别 / 报告 / 助手 / 配置四组用例）。
+后端单测：`cd server && uv run pytest`（识别 / 报告 / 工单 PDF / 助手 / 配置五组用例，CI 同步验证）。
 
 ## 目录结构
 
@@ -137,7 +137,14 @@ smartpatrol-app/
 │   ├── ParkMap.vue               # Canvas 2.5D 地图渲染
 │   └── EvidenceDialog.vue        # 证据弹窗
 ├── server/                       # FastAPI 薄后端 + 模拟设备 + 单测
-├── docs/device-protocol.md       # 真机设备接入协议文档
+├── docs/
+│   ├── device-protocol.md        # 真机设备接入协议文档
+│   ├── test-report.md            # 测试报告（20 组测试矩阵）
+│   ├── 答辩预案.md               # 评委常问 10 问 + 标准答法
+│   ├── 现场演示手册.md           # 演示流程 + 断网预案 + 故障重启速查
+│   ├── 国赛迭代方向.md           # 晋级国赛的迭代清单
+│   ├── 技术文档.pdf
+│   └── 作品介绍文档.pdf
 └── public/frames/                # 异常证据示例帧
 ```
 

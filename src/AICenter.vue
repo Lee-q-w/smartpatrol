@@ -1,3 +1,9 @@
+<!-- AICenter.vue —— AI 识别中心
+     职责：真图识别（虚→实）入口——上传真实巡检照片，经本地后端调用多模态大模型判读，
+     识别结果（类型/把握/证据）留档于识别记录，可一键「回填到当前场景」进入巡检闭环。
+     同页提供模型配置（Base URL / API Key / 模型名，保存前自动试连校验，
+     Key 仅落本机 server/config.local.json 不出机）；
+     后端离线时自动降级为提示模式，页面其余功能不受影响。 -->
 <template>
   <div class="ai-center">
     <!-- 左：模型配置 + 上传与识别 -->
@@ -199,6 +205,8 @@ async function checkBackend() {
 onMounted(loadModelCfg)
 
 // ---------- 识别 ----------
+// 识别请求直发本地后端（90s 超时对齐服务端大模型调用上限）；
+// 网络类失败（无后端）时给出「静态演示」降级提示，不当作异常报错
 async function recognize() {
   if (!imgFile.value) return
   checkBackend()
@@ -243,6 +251,7 @@ function fillFromHistory(h) {
 function doFill(r) {
   const meta = anomalyMeta(props.scene, r.type)
   const near = props.scene.dock ? `人工标注（${props.scene.name}）` : '人工标注'
+  // 组装统一协议的异常对象：证据照片用用户上传原图，来源标记「真图识别」
   emit('fill-anomaly', {
     type: r.type,
     label: meta.label || r.label,
@@ -254,6 +263,7 @@ function doFill(r) {
     frameDesc: r.evidence,
   })
   r.filled = true
+  // 同步「已回填」标记：r 可能是当前结果对象或历史记录对象，两种路径都要置位
   if (result.value && result.value === r) { /* result 视图同步 */ }
   const h = history.value.find(x => (result.value === r ? x.id === history.value.at(-1)?.id : x === r))
   if (h) h.filled = true

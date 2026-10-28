@@ -1,3 +1,6 @@
+<!-- SplashScreen.vue —— 启动引导页（品牌展示 + 加载占位）
+     职责：应用冷启动/慢网加载时提供品牌化过渡层，避免首屏白屏；
+     自动播放 2.4s 后淡出，或点击任意处跳过；结束后 emit('done') 通知父组件卸载。 -->
 <template>
   <Transition name="splash-fade">
     <div v-if="visible" class="splash" :class="{ leaving }" @click="skip">
@@ -30,6 +33,7 @@ const emit = defineEmits(['done'])
 const visible = ref(true)
 const leaving = ref(false)
 
+// finish()：先标记 leaving 触发淡出过渡，450ms 过渡结束后真正卸载并通知父组件
 function finish() {
   if (!visible.value) return
   leaving.value = true
@@ -37,6 +41,7 @@ function finish() {
 }
 function skip() { finish() }
 
+// 自动播放 2.4s（与进度条动画时长同步）；组件卸载时清理，避免内存泄漏
 let timer = null
 onMounted(() => { timer = setTimeout(finish, 2400) })
 onBeforeUnmount(() => clearTimeout(timer))

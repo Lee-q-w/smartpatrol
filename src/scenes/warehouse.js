@@ -54,19 +54,22 @@ export const WAREHOUSE_SCENE = {
     'zone-d': [[35, 27], [37, 20], [33, 18], [37, 25], [35, 27]],
   },
 
-  dock: { x: 35, y: 27 },
+  dock: { x: 35, y: 27 },   // AGV 停靠点（车库，右下角；所有分区路线以此为起终点）
 
+  // 仓库场景的巡检重点：货物堆放与通道占用（对应下方 anomalies 真值类型）
   anomalyTypes: [
     ANOMALY_TYPE_META.goods,
     ANOMALY_TYPE_META.blocked,
   ],
 
+  // 异常真值（仿真引擎按此注入）：坐标为世界坐标，near 关联设备/点位 id
   anomalies: [
     { type: 'goods', x: 14, y: 21, w: 3, h: 2, near: 'shelf-b2', label: '货物堆放违规' },
     { type: 'blocked', x: 28.2, y: 22.5, near: 'exit-2', label: '安全出口占用' },
   ],
 
   // 演示证据（无照片帧，待真图识别接入后采集补充）
+  // findings：复核确认后的证据记录（报告卡/证据弹窗展示）；与 anomalies 真值一一对应
   findings: [
     { type: 'goods', label: '货物堆放违规', place: 'B2 货架旁', conf: 0.93, level: 'high',
       evidence: '通道内货物越线堆放，占用消防间距，复核确认',
