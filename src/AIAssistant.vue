@@ -1,6 +1,7 @@
 <!-- AIAssistant.vue —— AI 巡检助手「小巡」（右下角悬浮球 + 对话面板）
-     职责：普通话下指令即执行——对话经后端 /api/agent/chat 由大模型做意图解析，
-     返回结构化 actions（动作白名单：patrol / switch_scene / switch_mode /
+     职责：普通话下指令即执行——对话走 /api/agent/chat/stream 流式端点
+     （SSE 逐字渲染 + 回答时检索本地巡检知识库增强），返回结构化 actions
+     （动作白名单：patrol / switch_scene / switch_mode /
      export_report / mark_resolved / recheck），emit('action') 上抛给 App 执行；
      后端不可用时自动降级本地规则引擎（离线优先，演示永不掉线），
      首次降级会引导配置模型 Key。 -->
@@ -18,9 +19,9 @@
         </div>
         <div class="msg-list" ref="listRef">
           <div v-for="(m, i) in messages" :key="i" class="msg" :class="m.role">
-            <div class="bubble">{{ m.text }}</div>
+            <div class="bubble" :class="{ streaming: streaming && m.role === 'ai' && i === messages.length - 1 }">{{ m.text }}</div>
           </div>
-          <div v-if="busy" class="msg ai"><div class="bubble typing">小巡思考中…</div></div>
+          <div v-if="busy && !streaming" class="msg ai"><div class="bubble typing">小巡思考中…</div></div>
         </div>
         <div class="chips">
           <button v-for="c in chips" :key="c" :disabled="busy" @click="send(c)">{{ c }}</button>
@@ -53,6 +54,7 @@ const API = 'http://127.0.0.1:8788'
 const open = ref(false)
 const input = ref('')
 const busy = ref(false)
+const streaming = ref(false)                    // 流式逐字渲染中
 const engine = ref('ai')                        // ai 大模型 / rule 离线规则
 const messages = ref([])
 const listRef = ref(null)
@@ -82,6 +84,9 @@ async function scrollToBottom() {
 
 // send()：发送一条用户消息。历史窗口取最近 8 条（含本轮）连同平台上下文
 // 一起交给模型；非 200 或网络失败一律走本地规则降级
+// send()：发送一条用户消息。走流式端点（SSE）逐字渲染回复：
+// delta 帧追加正文、reset 帧兼容旧 JSON 协议、结果帧下发 actions；
+// 非 200 / 网络失败 / error 帧 / 无内容 一律走本地规则降级
 async function send(preset) {
   const text = String(preset ?? input.value).trim()
   if (!text || busy.value) return
@@ -89,25 +94,59 @@ async function send(preset) {
   messages.value.push({ role: 'user', text })
   scrollToBottom()
   busy.value = true
+  streaming.value = false
   // 历史给模型（最近 8 条）
   const history = messages.value.slice(-8).map(m => ({ role: m.role, content: m.text }))
+  let current = null       // 正在流式生成的 AI 消息
+  let gotError = false     // 后端 error 帧（如模型未配置）
   try {
-    const r = await fetch(`${API}/api/agent/chat`, {
+    const r = await fetch(`${API}/api/agent/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: history, context: props.context }),
       signal: AbortSignal.timeout(45000),
     })
-    if (r.ok) {
-      const d = await r.json()
+    if (r.ok && r.body) {
       engine.value = 'ai'
-      reply(d.reply, d.actions)
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const frames = buf.split('\n\n')
+        buf = frames.pop()
+        for (const fr of frames) {
+          const line = fr.trim()
+          if (!line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (payload === '[DONE]') continue
+          let obj
+          try { obj = JSON.parse(payload) } catch { continue }
+          if (obj.error) { gotError = true; continue }
+          if (obj.reset) {
+            // 模型输出了旧 JSON 协议：正文替换为纯回复
+            if (!current) { current = { role: 'ai', text: '' }; messages.value.push(current) }
+            current.text = obj.reply || ''
+            continue
+          }
+          if (typeof obj.delta === 'string' && obj.delta) {
+            if (!current) { current = { role: 'ai', text: '' }; messages.value.push(current); streaming.value = true }
+            current.text += obj.delta
+            scrollToBottom()
+          }
+          if (Array.isArray(obj.actions)) for (const a of obj.actions) emit('action', a)
+        }
+      }
+      if (gotError || !current || !current.text) fallback(text)
     } else {
       fallback(text)
     }
   } catch {
     fallback(text)
   } finally {
+    streaming.value = false
     busy.value = false
     scrollToBottom()
   }
@@ -255,6 +294,9 @@ function ruleReply(t, ctx) {
 .msg.ai .bubble { background: #f4f6f9; color: #303133; border-top-left-radius: 2px; }
 .msg.user .bubble { background: linear-gradient(135deg, #409eff, #5aadff); color: #fff; border-top-right-radius: 2px; }
 .bubble.typing { color: #909399; font-style: italic; }
+/* 流式打字光标 */
+.bubble.streaming::after { content: '▌'; color: #409eff; animation: cursor-blink 1s step-start infinite; }
+@keyframes cursor-blink { 50% { opacity: 0; } }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 4px; }
 .chips button {
   border: 1px solid #d9ecff; background: #ecf5ff; color: #409eff; border-radius: 12px;

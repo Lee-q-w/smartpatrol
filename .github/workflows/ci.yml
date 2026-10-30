@@ -25,7 +25,7 @@ jobs:
         run: pnpm build
 
   backend-test:
-    name: 后端验证（识别 / 报告 / 工单 / 助手 / 配置）
+    name: 后端验证（识别 / 报告 / 工单 / 助手 / RAG / 流式 / 配置）
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -72,6 +72,14 @@ jobs:
         run: |
           set -o pipefail
           uv run python test_agent.py 2>&1 | tee /tmp/t4.log || { { echo '## test_agent 失败'; tail -30 /tmp/t4.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+      - name: RAG 知识库验证
+        run: |
+          set -o pipefail
+          uv run python test_rag.py 2>&1 | tee /tmp/t6.log || { { echo '## test_rag 失败'; tail -30 /tmp/t6.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+      - name: 助手流式验证
+        run: |
+          set -o pipefail
+          uv run python test_agent_stream.py 2>&1 | tee /tmp/t7.log || { { echo '## test_agent_stream 失败'; tail -40 /tmp/t7.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: 模型配置 API 验证
         run: |
           set -o pipefail

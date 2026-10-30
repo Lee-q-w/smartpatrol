@@ -17,6 +17,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.responses import Response
 
 from report_pdf import build_report_pdf
@@ -299,6 +300,8 @@ async def export_report(data: dict):
     )
 
 
+import knowledge_base as kb  # 本地 RAG：巡检知识库检索（零依赖 BM25）
+
 # ---------- AI 巡检助手（自然语言 → 意图 → 平台动作） ----------
 AGENT_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡"。用户（园区管理员，非技术人员）用自然语言指挥平台，你负责理解意图并产出动作。
 
@@ -317,7 +320,11 @@ AGENT_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡"
 1. 严格只输出 JSON（不要 markdown 包裹）：{{"reply":"简短中文回复，1-2 句，口语化，说明做了什么或结果如何","actions":[...]}}
 2. 任务进行中（phase 不为 idle/report）时不发起 patrol，回复请用户稍候
 3. 查询类问题（"有什么异常/情况怎么样"）直接依据状态信息回答，actions 为空数组
-4. 不确定意图时友好追问，不做猜测动作"""
+4. 处置方法、规范、平台用法类问题，优先依据知识库参考资料回答，保持简短；与参考资料无关的平台状态问题仍依据状态信息
+5. 不确定意图时友好追问，不做猜测动作
+
+知识库参考资料（来自本地巡检知识库检索，与问题相关时可引用）：
+{knowledge_block}"""
 
 
 def _build_context_block(ctx: dict) -> str:
@@ -369,6 +376,24 @@ def _parse_agent_output(text: str, ctx: dict) -> dict:
             "actions": []}
 
 
+def _rag_block(query: str) -> tuple[str, list[str]]:
+    """知识库检索 → 注入 prompt 的文本块 + 来源标题列表（无相关结果返回空）"""
+    hits = kb.search(query, top_k=2)
+    if not hits:
+        return "（无相关内容）", []
+    parts = [f"[{h['title']}] {h['text']}" for h in hits]
+    return "\n".join(parts), [h["title"] for h in hits]
+
+
+def _last_user_text(messages: list[dict]) -> str:
+    """取最后一条用户消息文本（RAG 检索用）"""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            c = m.get("content")
+            return c if isinstance(c, str) else ""
+    return ""
+
+
 @app.post("/api/agent/chat")
 async def agent_chat(data: dict):
     if not (CFG.get("api_key") and CFG.get("base_url")):
@@ -381,10 +406,12 @@ async def agent_chat(data: dict):
     messages = [m for m in messages if isinstance(m, dict) and m.get("role") in ("user", "assistant")][-8:]
 
     ctx = data.get("context") or {}
+    kb_block, kb_sources = _rag_block(_last_user_text(messages))
     payload = {
         "model": CFG.get("model", "agnes-3.0-flash"),
         "messages": [
-            {"role": "system", "content": AGENT_SYSTEM_PROMPT.format(context_block=_build_context_block(ctx))},
+            {"role": "system", "content": AGENT_SYSTEM_PROMPT.format(
+                context_block=_build_context_block(ctx), knowledge_block=kb_block)},
             *messages,
         ],
         "temperature": 0.2,
@@ -420,7 +447,172 @@ async def agent_chat(data: dict):
     except (KeyError, IndexError, TypeError):
         raise HTTPException(502, "模型响应格式异常")
 
-    return _parse_agent_output(content, ctx)
+    result = _parse_agent_output(content, ctx)
+    result["sources"] = kb_sources
+    return result
+
+
+# ---------- 流式助手端点（SSE，前端逐字渲染） ----------
+STREAM_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡"。用户（园区管理员，非技术人员）用自然语言指挥平台，你负责理解意图并产出动作。
+
+当前平台状态：
+{context_block}
+
+可执行动作（按需 0 个或多个，JSON 对象）：
+- {{"type":"patrol","args":{{"zoneIds":["zone-c"],"mode":"point"}}}}  发起巡逻。zoneIds 省略=全部分区；mode：quick 快速巡逻/point 定点详查/sweep 环视检查，省略=保持当前方式
+- {{"type":"switch_mode","args":{{"mode":"real"}}}}  切换数据源。sim 仿真/replay 历史回放/real 真机
+- {{"type":"switch_scene","args":{{"sceneId":"warehouse"}}}}  切换巡检场景
+- {{"type":"export_report","args":{{}}}}  导出 PDF 巡检报告
+- {{"type":"mark_resolved","args":{{"all":true}}}}  标记异常处置完成
+- {{"type":"recheck","args":{{"all":true}}}}  无人机复核全部待复核异常
+
+输出格式（严格遵守）：
+第一行起：给用户的简短中文回复，1-2 句，口语化纯文本（不要 JSON、不要 markdown、不要换行符转义）。
+回复结束后，另起一行输出：ACTIONS: [动作对象数组]，无动作为 ACTIONS: []
+
+规则：
+1. 任务进行中（phase 不为 idle/report）时不发起 patrol，回复请用户稍候
+2. 查询类问题直接依据状态信息回答，ACTIONS: []
+3. 处置方法、规范、平台用法类问题，优先依据知识库参考资料回答，保持简短；与参考资料无关的平台状态问题仍依据状态信息
+4. 不确定意图时友好追问，不做猜测动作
+
+知识库参考资料（来自本地巡检知识库检索，与问题相关时可引用）：
+{knowledge_block}"""
+
+
+def _sse(obj: dict) -> str:
+    return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+
+
+def _parse_stream_output(full: str, actions_raw: str | None) -> tuple[str, list[dict]]:
+    """流式全文解析：优先 ACTIONS: 行协议，兼容旧 JSON 协议，失败给兜底"""
+    known = {"patrol", "switch_mode", "switch_scene", "export_report", "mark_resolved", "recheck"}
+    if actions_raw is not None:
+        reply = full.split("ACTIONS:", 1)[0].strip()
+        try:
+            arr = json.loads(actions_raw.strip())
+            if isinstance(arr, list):
+                actions = [a for a in arr if isinstance(a, dict) and a.get("type") in known]
+                if reply:
+                    return reply, actions
+        except json.JSONDecodeError:
+            pass
+        return (reply or "抱歉，我没太理解。可以试试：「全面体检一下」。"), []
+    # 兼容：模型仍输出旧 JSON 协议
+    old = _parse_agent_output(full, {})
+    return old["reply"], old["actions"]
+
+
+@app.post("/api/agent/chat/stream")
+async def agent_chat_stream(data: dict):
+    """SSE 流式助手：delta 帧（逐字回复）→ 结果帧（actions/sources/done）→ [DONE]"""
+
+    async def gen():
+        if not (CFG.get("api_key") and CFG.get("base_url")):
+            yield _sse({"error": "模型未配置，即将切换离线规则模式"})
+            yield "data: [DONE]\n\n"
+            return
+        messages = data.get("messages") or []
+        if not isinstance(messages, list) or not messages:
+            yield _sse({"error": "messages 不能为空"})
+            yield "data: [DONE]\n\n"
+            return
+        messages = [m for m in messages if isinstance(m, dict) and m.get("role") in ("user", "assistant")][-8:]
+        ctx = data.get("context") or {}
+        kb_block, kb_sources = _rag_block(_last_user_text(messages))
+        payload = {
+            "model": CFG.get("model", "agnes-3.0-flash"),
+            "messages": [
+                {"role": "system", "content": STREAM_SYSTEM_PROMPT.format(
+                    context_block=_build_context_block(ctx), knowledge_block=kb_block)},
+                *messages,
+            ],
+            "temperature": 0.2,
+            "max_tokens": 2000,
+            "stream": True,
+        }
+        try:
+            client = httpx.AsyncClient(timeout=90)
+            req = client.build_request(
+                "POST", f"{CFG['base_url'].rstrip('/')}/chat/completions",
+                json=payload, headers={"Authorization": f"Bearer {CFG['api_key']}"},
+            )
+            r = await client.send(req, stream=True)
+            if r.status_code != 200:
+                await r.aclose()
+                await client.aclose()
+                yield _sse({"error": f"模型服务返回错误 {r.status_code}"})
+                yield "data: [DONE]\n\n"
+                return
+        except httpx.HTTPError as e:
+            yield _sse({"error": f"模型服务连接失败：{e}"})
+            yield "data: [DONE]\n\n"
+            return
+
+        full = ""
+        sent = 0            # 已转发到 full 的字符数
+        actions_raw = None  # ACTIONS: 之后的内容（None = 尚未出现）
+        try:
+            async for line in r.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                chunk = line[5:].strip()
+                if chunk == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(chunk)
+                except json.JSONDecodeError:
+                    continue
+                try:
+                    delta = obj["choices"][0]["delta"].get("content") or ""
+                except (KeyError, IndexError, AttributeError):
+                    delta = ""
+                if not delta:
+                    continue
+                full += delta
+                if actions_raw is None:
+                    idx = full.find("ACTIONS:")
+                    if idx >= 0:
+                        # ACTIONS 出现：补发其之前的正文，之后停止转发
+                        if idx > sent:
+                            yield _sse({"delta": full[sent:idx]})
+                        sent = idx
+                        actions_raw = full[idx + len("ACTIONS:"):]
+                    else:
+                        # 保留尾部若干字符，防止 ACTIONS: 标记被 chunk 截断后误转发
+                        safe = max(len(full) - 12, sent)
+                        if safe > sent:
+                            yield _sse({"delta": full[sent:safe]})
+                            sent = safe
+        except httpx.HTTPError:
+            pass  # 流中断：以已收到的内容收尾
+        finally:
+            await r.aclose()
+            await client.aclose()
+
+        if actions_raw is None:
+            idx = full.find("ACTIONS:")
+            if idx >= 0:
+                if idx > sent:
+                    yield _sse({"delta": full[sent:idx]})
+                actions_raw = full[idx + len("ACTIONS:"):]
+            elif len(full) > sent:
+                yield _sse({"delta": full[sent:]})
+
+        reply, actions = _parse_stream_output(full, actions_raw)
+        # 兼容模式：模型输出了旧 JSON 协议，正文已被流成 JSON 字符——发 reset 帧让前端替换为纯回复
+        if actions_raw is None and full.lstrip().startswith("{"):
+            yield _sse({"reset": True, "reply": reply})
+        elif reply and (len(reply) > sent or not full):
+            pass  # 正文已随流转发
+        yield _sse({"actions": actions, "sources": kb_sources, "done": True, "reply": reply})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 if __name__ == "__main__":
