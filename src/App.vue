@@ -144,14 +144,15 @@
                 <el-radio-button v-for="(m, k) in PATROL_MODES" :key="k" :value="k">{{ m.label }}</el-radio-button>
               </el-radio-group>
             </div>
-            <div class="mode-tip">{{ modeDesc }}</div>
-            <el-button :type="startBtn.type" size="large" style="width:100%; margin-top: 10px"
-              :disabled="startBtn.disabled" @click="startPatrol">
-              {{ startBtn.text }}
-            </el-button>
-            <el-button style="width:100%; margin-top: 8px" :disabled="recheckBtn.disabled" @click="recheckAll">
-              {{ recheckBtn.text }}
-            </el-button>
+            <div class="ctrl-btn-row">
+              <el-button :type="startBtn.type" size="large" style="flex: 1.6"
+                :disabled="startBtn.disabled" @click="startPatrol">
+                {{ startBtn.text }}
+              </el-button>
+              <el-button size="large" style="flex: 1" :disabled="recheckBtn.disabled" @click="recheckAll">
+                {{ recheckBtn.text }}
+              </el-button>
+            </div>
           </template>
           <template v-else>
             <!-- 回放播放器 -->
@@ -169,18 +170,24 @@
             </div>
             <div class="mode-tip">可暂停、拖动进度条跳转 · 省赛真实记录（园区西南分区闭环）</div>
           </template>
-          <el-slider v-if="!isReal" v-model="speed" :min="0.5" :max="4" :step="0.5" style="margin:18px 0 6px" />
-          <div class="status-line">
+          <el-collapse class="ctrl-more">
+            <el-collapse-item name="more" title="更多设置与说明">
+              <el-slider v-if="!isReal" v-model="speed" :min="0.5" :max="4" :step="0.5" style="margin: 2px 0 0" />
+              <div class="mode-tip" v-if="!isReplay">{{ modeDesc }}</div>
+              <div class="mode-tip">当前数据源：<b>{{ modeName }}</b></div>
+              <div class="mode-tip" v-if="!isReal && !isReplay">提示：真值异常位于 {{ truthZonesText }}，其余分区巡逻将报告“未发现异常”</div>
+            </el-collapse-item>
+          </el-collapse>
+          <div class="ctrl-status">
+            <span class="phase-dot" :class="phase"></span>
+            <b>{{ phaseLabel }}</b>
+            <template v-if="!isReplay"><span class="cs-sep">·</span><span>{{ scopeText }}</span></template>
+            <span class="cs-sep">·</span>
             <span class="battery">电量 {{ devices.agv.battery }}%</span>
+            <span class="cs-sep">·</span>
             <span>{{ isReplay ? '回放倍速' : '速度' }} {{ speed }}x</span>
           </div>
-          <div class="mode-tip">
-            <span class="phase-dot" :class="phase"></span>
-            任务状态：<b>{{ phaseLabel }}</b><template v-if="!isReplay"> · 范围：{{ scopeText }}</template>
-          </div>
-          <div class="mode-tip">当前数据源：<b>{{ modeName }}</b></div>
           <div class="mode-tip" v-if="isReal">真机模式：异常由 AI 识别摄像头画面产生，点击报告可查看实拍证据</div>
-          <div class="mode-tip" v-else-if="!isReplay">提示：真值异常位于 {{ truthZonesText }}，其余分区巡逻将报告“未发现异常”</div>
         </el-card>
 
         <el-card class="log-card">
@@ -677,6 +684,16 @@ html, body, #app { height: 100%; }
 .status-line { display: flex; justify-content: space-between; margin-top: 10px; color: #909399; font-size: 13px; }
 .battery { color: #67c23a; font-weight: 600; }
 .mode-tip { margin-top: 8px; font-size: 12px; color: #909399; }
+/* 控制卡精简（评委反馈）：开始/复检并排，次要信息折叠收纳，状态合并一行 */
+.ctrl-btn-row { display: flex; gap: 8px; margin-top: 10px; }
+.ctrl-btn-row .el-button { margin: 0; flex: 1; white-space: normal; height: auto; min-height: 40px; padding-top: 7px; padding-bottom: 7px; }
+.ctrl-more { margin-top: 10px; --el-collapse-header-height: 30px; border-top: none; border-bottom: none; }
+.ctrl-more :deep(.el-collapse-item__header) { font-size: 12px; color: #909399; background: transparent; border-bottom: 1px dashed #ebeef5; }
+.ctrl-more :deep(.el-collapse-item__wrap) { background: transparent; border-bottom: none; }
+.ctrl-more :deep(.el-collapse-item__content) { padding-bottom: 6px; }
+.ctrl-status { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: 10px; color: #909399; font-size: 13px; }
+.ctrl-status b { color: #606266; }
+.cs-sep { color: #dcdfe6; }
 .log-count { margin-left: 8px; color: #909399; font-size: 12px; }
 .cmd-stream { flex: 1; overflow-y: auto; font-size: 12px; }
 .log-line { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px dashed #f0f0f0; animation: fade-in .3s; }
@@ -800,6 +817,9 @@ html, body, #app { height: 100%; }
 .app[data-theme='dark'] .conn-panel { background: #0e1a29; border-color: #1d3350; }
 .app[data-theme='dark'] .conn-head { color: #cfe0f5; }
 .app[data-theme='dark'] .conn-panel code { background: #14273d; color: #8fb0d0; }
+.app[data-theme='dark'] .ctrl-more :deep(.el-collapse-item__header) { color: #8fb0d0; border-bottom-color: #1d3350; }
+.app[data-theme='dark'] .ctrl-status b { color: #cfe0f5; }
+.app[data-theme='dark'] .cs-sep { color: #2c4a6b; }
 
 /* ---------- 窄窗口降级：单列（地图在上，控制区在下） ---------- */
 @media (max-width: 1180px) {
