@@ -70,15 +70,18 @@
               <el-button v-if="draft.routes[z.id]?.length" size="small" text type="danger" @click="draft.routes[z.id] = []">清路线</el-button>
             </span>
           </div>
-          <div class="wb-list-empty" v-if="!draft.zones.length">还没有分区，用「分区」模式拖拽画一个</div>
+          <div class="wb-list-empty" v-if="!draft.zones.length">还没有分区，用「分区」模式点击两角画一个</div>
         </div>
-        <div class="wb-row" style="margin-top:4px">
-          <span class="wb-k">载入现有</span>
-          <el-select v-model="loadFromId" size="small" style="flex:1" placeholder="选择场景载入编辑">
-            <el-option v-for="s in loadScenes" :key="s.id" :value="s.id" :label="s.name" />
-          </el-select>
-          <el-button size="small" :disabled="!loadFromId" @click="loadFrom">载入</el-button>
-        </div>
+        <el-collapse class="wb-load">
+          <el-collapse-item title="载入已有场景" name="load">
+            <div class="wb-row">
+              <el-select v-model="loadFromId" size="small" style="flex:1" placeholder="选择场景载入编辑">
+                <el-option v-for="s in loadScenes" :key="s.id" :value="s.id" :label="s.name" />
+              </el-select>
+              <el-button size="small" :disabled="!loadFromId" @click="loadFrom">载入</el-button>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
       </el-card>
 
       <el-card class="wb-card">
@@ -94,7 +97,7 @@
     <!-- 右：编辑画布 -->
     <section class="wb-map-wrap">
       <canvas ref="canvasRef" :width="cw" :height="ch"
-        @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp"
+        @mousemove="onMouseMove"
         @mouseleave="onMouseLeave" @dblclick="onDblClick" @contextmenu.prevent="onContextMenu" />
       <div class="wb-coord">{{ hoverText }}</div>
 
@@ -164,7 +167,7 @@ const MODES = [
 ]
 const HINTS = {
   select: '点击画布中的分区 / 设备 / 停靠点选中，右侧面板可改名或删除',
-  zone: '在画布上按住鼠标拖拽，画出一个分区矩形（最小 2×2 米）',
+  zone: '点击第一个角 → 移动鼠标预览 → 再点对角完成分区（最小 2×2 米，右键取消）',
   device: '选好设备类型后，点击画布逐个放置点位（垃圾桶、货架…）',
   route: '选目标分区 → 依次点击画布描路线点 → 双击或点「完成路线」结束',
   dock: '点击画布设置停靠点（设备出发与补给位置）',
@@ -190,6 +193,7 @@ function toggleType(t) {
 function setMode(m) {
   mode.value = m
   if (m !== 'route') routeDraft.value = []
+  if (m !== 'zone') { dragStart.value = null; dragCur.value = null }   // 切出分区模式取消未完成的预览
   selected.value = null
   draw()
 }
@@ -202,8 +206,8 @@ const cw = computed(() => BASE_W)
 const ch = computed(() => Math.round(draft.world.h * scale.value))
 
 const hover = ref(null)
-const dragStart = ref(null)   // 分区拖拽起点（世界坐标）
-const dragCur = ref(null)     // 拖拽当前点
+const dragStart = ref(null)   // 分区第一角（点击设定）
+const dragCur = ref(null)     // 预览当前角（跟随鼠标）
 const routeDraft = ref([])    // 正在描的路线点 [[x,y],...]
 const selected = ref(null)    // {kind:'zone'|'device'|'dock', index}
 
@@ -276,32 +280,30 @@ function compressImage(file, maxW = 1280) {
 }
 
 // ---------- 鼠标交互 ----------
-function onMouseDown(e) {
-  const p = evtToWorld(e)
-  if (mode.value === 'zone') { dragStart.value = p; dragCur.value = p }
-}
+// 分区绘制：点击第一个角 → 移动鼠标预览 → 点击对角完成（不用拖拽，录屏更稳）
 function onMouseMove(e) {
   hover.value = evtToWorld(e)
   if (dragStart.value) dragCur.value = evtToWorld(e)
-  draw()
-}
-function onMouseUp(e) {
-  if (!dragStart.value) return
-  const p = evtToWorld(e)
-  const a = dragStart.value, b = p
-  dragStart.value = null; dragCur.value = null
-  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y)
-  const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y)
-  if (w < 2 || h < 2) { draw(); return }
-  const name = `分区 ${String.fromCharCode(65 + draft.zones.length)}`
-  draft.zones.push({ id: nextZoneId(), name, rect: [round2(x), round2(y), round2(w), round2(h)] })
-  if (!routeZone.value) routeZone.value = draft.zones[draft.zones.length - 1].id
   draw()
 }
 function onMouseLeave() { hover.value = null; draw() }
 
 function onClickCanvas(e) {
   const p = evtToWorld(e)
+  if (mode.value === 'zone') {
+    if (!dragStart.value) { dragStart.value = p; dragCur.value = p; draw(); return }
+    // 第二次点击：完成分区
+    const a = dragStart.value, b = p
+    dragStart.value = null; dragCur.value = null
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y)
+    const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y)
+    if (w < 2 || h < 2) { ElMessage.warning('分区太小：请保证至少 2×2 米，重新点击两角'); draw(); return }
+    const name = `分区 ${String.fromCharCode(65 + draft.zones.length)}`
+    draft.zones.push({ id: nextZoneId(), name, rect: [round2(x), round2(y), round2(w), round2(h)] })
+    if (!routeZone.value) routeZone.value = draft.zones[draft.zones.length - 1].id
+    draw()
+    return
+  }
   if (mode.value === 'device') {
     const kind = kindOf(null, deviceKind.value)
     const n = nextDeviceNum(deviceKind.value)
@@ -335,6 +337,7 @@ function onDblClick(e) {
 }
 function onContextMenu() {
   if (mode.value === 'route' && routeDraft.value.length) finishRoute()
+  if (mode.value === 'zone' && dragStart.value) { dragStart.value = null; dragCur.value = null; draw() }   // 右键取消分区预览
 }
 
 let boundCanvas = null
@@ -440,7 +443,7 @@ function draw() {
     ctx.fillText(z.name, zx * s + 8, zy * s + 18)
   })
 
-  // 分区拖拽预览
+  // 分区两角预览
   if (dragStart.value && dragCur.value) {
     const x = Math.min(dragStart.value.x, dragCur.value.x) * s
     const y = Math.min(dragStart.value.y, dragCur.value.y) * s
@@ -579,7 +582,7 @@ function applyDraft(scene) {
 // ---------- 保存 / 导入 / 导出 / 载入 ----------
 function save() {
   if (!draft.name.trim()) { ElMessage.warning('请先填写场景名称'); return }
-  if (!draft.zones.length) { ElMessage.warning('请至少绘制一个分区（用「分区」模式拖拽）'); return }
+  if (!draft.zones.length) { ElMessage.warning('请至少绘制一个分区（用「分区」模式点击两角）'); return }
   if (!draft.dock) { ElMessage.warning('请设置停靠点（用「停靠点」模式点击画布）'); return }
   if (!checkedTypes.value.length) { ElMessage.warning('请至少点选一种可识别异常类型'); return }
   for (const z of draft.zones) {
@@ -671,6 +674,11 @@ function onMoreCommand(cmd) {
 .wb-types { display: flex; flex-wrap: wrap; gap: 6px; }
 .wb-count { margin-left: auto; font-size: 12px; color: #909399; font-weight: normal; }
 .wb-list { max-height: 180px; overflow-y: auto; }
+/* 载入已有场景折叠区（默认收起，侧栏减拥挤） */
+.wb-load { margin-top: 6px; border-top: none; border-bottom: none; }
+.wb-load :deep(.el-collapse-item__header) { font-size: 12px; color: #909399; height: 30px; line-height: 30px; background: transparent; border-bottom: none; }
+.wb-load :deep(.el-collapse-item__wrap) { background: transparent; border-bottom: none; }
+.wb-load :deep(.el-collapse-item__content) { padding-bottom: 4px; }
 .wb-list-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 2px; font-size: 13px; cursor: pointer; border-bottom: 1px dashed #f0f0f0; }
 .wb-list-item:hover { color: #409eff; }
 .wb-list-sub { color: #909399; font-size: 12px; display: flex; gap: 4px; align-items: center; }
