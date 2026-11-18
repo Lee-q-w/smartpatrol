@@ -673,7 +673,7 @@ function onMoreCommand(cmd) {
 .wb-modes { display: flex; flex-wrap: wrap; gap: 6px; }
 .wb-types { display: flex; flex-wrap: wrap; gap: 6px; }
 .wb-count { margin-left: auto; font-size: 12px; color: #909399; font-weight: normal; }
-.wb-list { max-height: 180px; overflow-y: auto; }
+.wb-list { }   /* 不限高：分区多时侧栏自然拉长，页面整体滚动，不出卡内滑块 */
 /* 载入已有场景折叠区（默认收起，侧栏减拥挤） */
 .wb-load { margin-top: 6px; border-top: none; border-bottom: none; }
 .wb-load :deep(.el-collapse-item__header) { font-size: 12px; color: #909399; height: 30px; line-height: 30px; background: transparent; border-bottom: none; }
