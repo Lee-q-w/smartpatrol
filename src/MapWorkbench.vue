@@ -651,7 +651,7 @@ function onMoreCommand(cmd) {
 </script>
 
 <style scoped>
-.workbench { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 238px); min-height: 520px; }
+.workbench { display: flex; flex-direction: column; gap: 12px; min-height: calc(100vh - 238px); }   /* 解锁一屏高：侧栏内容多时页面整体拉长，不再卡内滚动 */
 
 /* 顶条：场景信息 + 主操作，一行放下 */
 .wb-topbar {
@@ -664,7 +664,7 @@ function onMoreCommand(cmd) {
 .wb-top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
 .wb-body { flex: 1; display: flex; gap: 16px; align-items: stretch; min-height: 0; }
-.wb-side { width: 360px; flex: none; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-right: 4px; }
+.wb-side { width: 360px; flex: none; display: flex; flex-direction: column; gap: 12px; }   /* 不再内部滚动，跟随页面整体滚动 */
 .wb-card :deep(.el-card__body) { display: flex; flex-direction: column; gap: 8px; }
 .wb-row { display: flex; align-items: center; gap: 8px; }
 .wb-k { font-size: 13px; color: #909399; flex: none; width: 64px; }
