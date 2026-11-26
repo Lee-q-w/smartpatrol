@@ -31,13 +31,16 @@
    │  仿真引擎    │ 历史回放       │ 真机设备    │             │
    └─────────────┴───────────────┴─────────────┘      FastAPI 薄后端 :8788
    （前端内置，零依赖可离线运行）                        ├ AI 照片识别（OpenAI 兼容接口）
-   统一协议 core/protocol.js                            ├ PDF 报告生成（ReportLab）
-   patrol / recheck / handle / stop / …                 └ 巡检助手意图解析
+统一协议 core/protocol.ts                            ├ PDF 报告生成（ReportLab）
+    patrol / recheck / handle / stop / …                 ├ 巡检助手（流式 + RAG + 双引擎兜底）
+                                                        ├ MCP 桥接（状态快照 / 指令总线 / SSE）
                                                         WebSocket :9601 真机设备接入
+                                                        MCP Server :8790（6 工具，标准协议）
 ```
 
-- **前端**：Vue 3（Composition API）+ Vite + Element Plus，地图自研 Canvas 2.5D 渲染，离线优先、可静态部署
-- **后端**：FastAPI 薄服务（仅 AI 识别 / PDF 报告 / 助手对话 / 模型配置四个接口），前端核心逻辑不依赖后端
+- **前端**：Vue 3（Composition API）+ Vite + Element Plus，地图自研 Canvas 2.5D 渲染，离线优先、可静态部署；核心协议、场景模型与 MCP 桥接已迁移至 **TypeScript**（`tsconfig.json` 严格模式，`pnpm typecheck` 全量校验，CI 卡口）
+- **后端**：FastAPI 薄服务（AI 识别 / PDF 报告 / 助手对话 / 模型配置 / MCP 桥接），前端核心逻辑不依赖后端
+- **MCP 集成**：`server/mcp_server.py` 基于官方 `mcp` SDK（FastMCP，streamable-http）暴露 6 个工具，Claude / Cursor / TeleAgent 等标准 MCP 客户端可直接查询园区状态、指挥巡检作业
 - **设备接入**：WebSocket 设备协议（详见 `docs/device-protocol.md`），附 `server/sim_device.py` 模拟真机可本地联调
 
 ## 功能特性
@@ -49,7 +52,9 @@
 | 工单闭环 | 派单 → 处理中 → 完成 / 重开，统计与证据弹窗联动 |
 | 地图工作台 | 拖拽自建巡检场地（分区 / 设备 / 停靠点 / 路线），保存即用 |
 | AI 识别中心 | 照片上传智能判读、回填场景异常库、页面内模型配置 |
-| AI 巡检助手 | 普通话下指令即执行（流式输出 + 意图解析 + 动作白名单），回答检索本地巡检知识库增强；后端离线自动降级本地规则 |
+| AI 巡检助手 | 普通话下指令即执行（流式输出 + 意图解析 + 动作白名单），**思考链实时展示「检索→推理→执行」三阶段**，回答检索本地巡检知识库增强；后端离线自动降级本地规则（双引擎） |
+| 语音交互 | Web Speech API 语音输入（唤醒词「小巡」）+ TTS 回复播报，可随时关闭；浏览器不支持时自动隐藏 |
+| MCP 工具集成 | 标准 MCP 客户端可读取园区状态、异常清单，并下发巡检/复核/报告指令，与页面操作共用同一动作链 |
 | 值守大屏 | 全屏指挥中心：统计卡、语义染色情报流、时钟 |
 | 回放模式 | 历史巡逻记录回放，支持暂停 / 拖动进度条 / 续播 |
 
@@ -66,6 +71,7 @@
 ```bash
 pnpm install          # 安装依赖（vue / element-plus 等，见 package.json）
 pnpm dev              # 开发模式，默认 http://localhost:5199
+pnpm typecheck        # TypeScript 类型检查（vue-tsc --noEmit）
 pnpm build            # 生产构建，产物在 dist/，任意静态服务器可部署
 ```
 
@@ -89,6 +95,27 @@ uv run python sim_device.py   # WebSocket 设备模拟器，默认 ws://localhos
 ```
 
 页面顶栏切「真机」模式，连接 `ws://localhost:9601` 即可体验完整真机链路。
+
+### 4）MCP Server（可选，标准 MCP 客户端接入）
+
+```bash
+cd server
+uv run python mcp_server.py   # streamable-http，默认 http://127.0.0.1:8790/mcp
+```
+
+需先启动后端（8788）与前端（页面打开后会自动上报平台状态）。MCP 客户端配置示例：
+
+```json
+{
+  "mcpServers": {
+    "smartpatrol": {
+      "url": "http://127.0.0.1:8790/mcp"
+    }
+  }
+}
+```
+
+开放的工具：`smartpatrol_get_park_status`（园区状态）、`smartpatrol_list_anomalies`（异常清单）、`smartpatrol_start_patrol`（发起巡检）、`smartpatrol_execute_action`（处置动作）、`smartpatrol_ask_assistant`（巡检知识问答）、`smartpatrol_recognize_image`（照片识别）。端到端自测：`uv run python test_mcp.py`。
 
 ## 环境配置说明
 
@@ -115,30 +142,33 @@ AI 功能通过 OpenAI 兼容接口对接大模型。配置方式二选一：
 
 | 端 | 清单文件 | 主要依赖 |
 |---|---|---|
-| 前端 | `package.json` / `pnpm-lock.yaml` | vue 3、element-plus、vite |
-| 后端 | `server/pyproject.toml` / `server/uv.lock` | fastapi、uvicorn、httpx、reportlab、pillow、websockets |
+| 前端 | `package.json` / `pnpm-lock.yaml` | vue 3、element-plus、vite、typescript、vue-tsc |
+| 后端 | `server/pyproject.toml` / `server/uv.lock` | fastapi、uvicorn、httpx、reportlab、pillow、websockets、mcp |
 
-后端单测：`cd server && uv run pytest`（识别 / 报告 / 工单 PDF / 助手 / 配置五组用例，CI 同步验证）。
+后端单测：`cd server && uv run pytest`（识别 / 报告 / 工单 PDF / 助手 / 流式 / RAG / 配置等用例，CI 同步验证）；MCP 端到端：`uv run python test_mcp.py`。
 
 ## 目录结构
 
 ```
 smartpatrol-app/
 ├── src/
-│   ├── core/protocol.js          # 统一巡检协议（三数据源共用命令与事件）
+│   ├── core/protocol.ts         # 统一巡检协议（三数据源共用命令与事件，TS 强类型）
 │   ├── adapters/                 # Sim / Replay / Real 三适配器
 │   ├── composables/useDataSource.js  # 数据源统一接入层
-│   ├── scenes/                   # 场景数据模型（园区 / 仓库 / 自建）
+│   ├── composables/useMcpBridge.ts   # MCP 桥接（状态上报 + 指令通道）
+│   ├── scenes/sceneSchema.ts     # 场景数据模型（园区 / 仓库 / 自建）
 │   ├── App.vue                   # 实时巡检主视图 + 值守大屏
 │   ├── HomeView.vue              # 门户首页
 │   ├── MapWorkbench.vue          # 地图工作台
 │   ├── AICenter.vue              # AI 识别中心
-│   ├── AIAssistant.vue           # AI 巡检助手（流式输出）
+│   ├── AIAssistant.vue           # AI 巡检助手（流式输出 + 思考链 + 语音）
 │   ├── ParkMap.vue               # Canvas 2.5D 地图渲染
 │   └── EvidenceDialog.vue        # 证据弹窗
-├── server/                       # FastAPI 薄后端 + 模拟设备 + 单测
+├── server/                       # FastAPI 薄后端 + MCP Server + 模拟设备 + 单测
+│   ├── mcp_server.py             # MCP Server（6 个工具，streamable-http :8790）
 │   ├── knowledge/                # 巡检知识库（处置 SOP / 判定标准 / 平台指南）
 │   └── knowledge_base.py         # 本地 RAG 检索（零依赖 BM25）
+├── tsconfig.json                 # TypeScript 严格模式配置
 ├── docs/
 │   ├── device-protocol.md        # 真机设备接入协议文档
 │   ├── test-report.md            # 测试报告（20 组测试矩阵）
