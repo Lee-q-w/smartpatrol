@@ -669,18 +669,19 @@ html, body, #app { height: 100%; }
   background: #fff; color: #606266; font-size: 13px; cursor: pointer; transition: all .2s;
 }
 .back-home:hover { color: #409eff; border-color: #409eff; box-shadow: 0 2px 10px rgba(64,158,255,.15); }
-.main { display: flex; gap: 18px; align-items: stretch; min-height: calc(100vh - 238px); }
-.map-panel { flex: 1 1 auto; min-width: 0; padding: 14px; border-radius: 12px; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.08), inset 0 0 0 1px rgba(31,45,61,0.04); display: flex; align-items: center; justify-content: center; }
+.main { display: flex; gap: 18px; align-items: flex-start; min-height: calc(100vh - 238px); }
+.map-panel { flex: 1 1 auto; min-width: 0; height: calc(100vh - 238px); position: sticky; top: 14px; padding: 14px; border-radius: 12px; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.08), inset 0 0 0 1px rgba(31,45,61,0.04); display: flex; align-items: center; justify-content: center; }
 /* contain 自适应：画布在容器内等比最大化（max-width/max-height + auto），点击坐标已做缩放补偿 */
 .map-panel :deep(.park-map-wrap) { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 .map-panel :deep(canvas) { max-width: 100%; max-height: 100%; width: auto; height: auto; }
 .side { width: 460px; flex: none; display: flex; flex-direction: column; gap: 16px; }
 /* 侧栏多板块均匀分布：控制卡自然高，命令流与报告卡弹性瓜分剩余高度 */
 .ctrl-card { flex: none; }
-.log-card { flex: 1 1 0; display: flex; flex-direction: column; min-height: 150px; }
-.log-card :deep(.el-card__body) { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.report-card { flex: 1.6 1 0; display: flex; flex-direction: column; min-height: 170px; }
-.report-card :deep(.el-card__body) { flex: 1; overflow-y: auto; min-height: 0; }
+/* 命令流/报告卡自然高度：内容多时页面整体拉长，卡内不再滚动 */
+.log-card { flex: none; display: flex; flex-direction: column; }
+.log-card :deep(.el-card__body) { flex: none; display: flex; flex-direction: column; overflow: visible; }
+.report-card { flex: none; display: flex; flex-direction: column; }
+.report-card :deep(.el-card__body) { flex: none; overflow: visible; }
 .status-line { display: flex; justify-content: space-between; margin-top: 10px; color: #909399; font-size: 13px; }
 .battery { color: #67c23a; font-weight: 600; }
 .mode-tip { margin-top: 8px; font-size: 12px; color: #909399; }
@@ -695,7 +696,7 @@ html, body, #app { height: 100%; }
 .ctrl-status b { color: #606266; }
 .cs-sep { color: #dcdfe6; }
 .log-count { margin-left: 8px; color: #909399; font-size: 12px; }
-.cmd-stream { flex: 1; overflow-y: auto; font-size: 12px; }
+.cmd-stream { flex: none; font-size: 12px; }
 .log-line { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px dashed #f0f0f0; animation: fade-in .3s; }
 .log-ts { color: #c0c4cc; flex: none; }
 .log-text { color: #606266; }
@@ -825,6 +826,7 @@ html, body, #app { height: 100%; }
 @media (max-width: 1180px) {
   .main { flex-direction: column; min-height: 0; }
   .side { width: auto; }
+  .map-panel { position: static; height: auto; }
   .map-panel :deep(canvas) { max-height: none; }
   .log-card, .report-card { flex: none; }
   .log-card :deep(.el-card__body), .report-card :deep(.el-card__body) { flex: none; overflow: visible; }

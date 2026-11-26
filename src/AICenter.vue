@@ -282,14 +282,16 @@ function fmtTime(ts) {
 </script>
 
 <style scoped>
-.ai-center { display: grid; grid-template-columns: 460px minmax(0, 1fr); gap: 18px; align-items: stretch; min-height: calc(100vh - 238px); }
+.ai-center { display: grid; grid-template-columns: 460px minmax(0, 1fr); gap: 18px; align-items: start; min-height: calc(100vh - 238px); }
 .ai-side { display: flex; flex-direction: column; gap: 14px; }
 .ai-side .ai-card { display: flex; flex-direction: column; }
-.ai-side .upload-card { flex: 1; }
+.ai-side .upload-card { flex: none; }
 .ai-side .upload-card :deep(.el-card__body) { flex: 1; }
 .ai-main { min-width: 0; display: flex; flex-direction: column; }
-.ai-main .ai-card { flex: 1; display: flex; flex-direction: column; }
-.ai-main .ai-card :deep(.el-card__body) { flex: 1; overflow-y: auto; min-height: 0; }
+.ai-main .ai-card { flex: none; display: flex; flex-direction: column; }
+.ai-main .ai-card :deep(.el-card__body) { overflow: visible; }
+/* 左栏随滚动吸附（与实时巡检地图同策略） */
+.ai-side { position: sticky; top: 14px; }
 .ai-card :deep(.el-card__body) { display: flex; flex-direction: column; gap: 8px; }
 .ai-drop { display: flex; align-items: center; justify-content: center; border: 2px dashed #c0c4cc; border-radius: 10px; min-height: 220px; cursor: pointer; overflow: hidden; transition: border-color .2s; flex: 1; }
 .ai-drop:hover { border-color: #409eff; }
