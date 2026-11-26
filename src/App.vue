@@ -261,6 +261,7 @@ import AIAssistant from './AIAssistant.vue'
 import HomeView from './HomeView.vue'
 import SplashScreen from './SplashScreen.vue'
 import { useDataSource, DataSourceMode } from './composables/useDataSource.js'
+import { useMcpBridge } from './composables/useMcpBridge.js'
 import { PATROL_MODES } from './parkData.js'
 import { DRONE_FRAME } from './parkData.js'
 const DRONE_FRAME_REF = DRONE_FRAME.ref   // 无人机俯拍复核帧（省赛实录，仅园区）
@@ -370,11 +371,39 @@ async function onAssistantAction(a) {
       targets.forEach(x => dispatch('handle', { anomalyId: x.id, to: 'resolved' }))
     } else if (type === 'recheck') {
       recheckAll()
+    } else if (type === 'workorder') {
+      // MCP/助手工单流转：指定异常的处置状态（pending → processing → resolved）
+      const a = anomalies.value.find(x => x.id === args.anomalyId)
+      if (!a) { ElMessage.warning(`未找到异常 ${args.anomalyId}`); return }
+      if (!['pending', 'processing', 'resolved'].includes(args.to)) { ElMessage.warning(`非法状态 ${args.to}`); return }
+      dispatch('handle', { anomalyId: a.id, to: args.to })
     }
   } catch (e) {
     ElMessage.error('助手动作执行失败：' + (e.message ?? e))
   }
 }
+
+// —— MCP 桥接：状态上报 + 指令执行（Claude/Cursor/TeleAgent 等标准 MCP 客户端指挥平台） ——
+useMcpBridge({
+  // 平台快照（与内置助手上下文同源，额外补 id/坐标/证据等 MCP 查询所需字段）
+  source: () => ({
+    scene: { id: currentScene.value.id, name: currentScene.value.name },
+    mode: dsMode.value, phase: phase.value, patrolMode: patrolMode.value,
+    battery: Math.round(devices.agv.battery),
+    position: { x: +devices.agv.x.toFixed(1), y: +devices.agv.y.toFixed(1) },
+    agvStatus: devices.agv.status,
+    zones: zoneList.value,
+    anomalies: anomalies.value.map(a => ({
+      id: a.id, type: a.type, label: a.label, near: a.near,
+      zoneName: zoneList.value.find(z => z.id === a.zone)?.name,
+      confidence: a.confidence, stage: a.stage,
+      handleStatus: a.handle?.status ?? 'pending', evidence: a.evidence,
+    })),
+    stats: handleStats.value, reportGenerated: !!report.value,
+  }),
+  watchTargets: [dsMode, phase, patrolMode, anomalies, devices, report],
+  actionExecutor: onAssistantAction,   // 与 AI 助手同一套动作链（含 workorder）
+})
 const ticketLabel = a => ({ pending: '未处理', processing: '处理中', resolved: '已处理' }[a.handle?.status ?? 'pending'] ?? '未处理')
 const ticketTagType = a => ({ pending: 'warning', processing: 'primary', resolved: 'success' }[a.handle?.status ?? 'pending'] ?? 'warning')
 const ticketBtnText = a => ({ pending: '派单处理 →', processing: '完成处置 →', resolved: '重新打开' }[a.handle?.status ?? 'pending'] ?? '派单处理 →')

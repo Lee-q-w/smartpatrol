@@ -84,3 +84,62 @@ jobs:
         run: |
           set -o pipefail
           uv run python test_config_api.py 2>&1 | tee /tmp/t5.log || { { echo '## test_config_api 失败'; tail -30 /tmp/t5.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+
+  mcp-test:
+    name: MCP Server 验证（工具清单 / 状态桥 / 指令通道）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: 安装依赖
+        run: uv sync
+      - name: 启动后端与 MCP Server
+        run: |
+          nohup uv run python main.py > /tmp/backend.log 2>&1 &
+          nohup uv run python mcp_server.py > /tmp/mcp.log 2>&1 &
+          sleep 6
+          curl -sf http://127.0.0.1:8788/api/health > /dev/null || { cat /tmp/backend.log; exit 1; }
+          curl -sf -o /dev/null http://127.0.0.1:8790/mcp || true   # 探活（405 也算在线）
+      - name: MCP 端到端验证
+        run: |
+          set -o pipefail
+          uv run python test_mcp.py 2>&1 | tee /tmp/t8.log || { { echo '## test_mcp 失败'; tail -30 /tmp/t8.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+
+  deploy-pages:
+    name: 部署在线演示（gh-pages 自动同步）
+    needs: [frontend-build]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: 安装依赖并构建
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: 推送 dist 到 gh-pages
+        run: |
+          cd dist
+          git init -b gh-pages -q
+          git config user.name "ci-bot"
+          git config user.email "ci@smartpatrol.local"
+          printf '# 智巡 SmartPatrol 在线演示（CI 自动部署）\n' > README.md
+          touch .nojekyll
+          git add -A
+          git commit -q -m "deploy: CI 自动部署 master@${GITHUB_SHA::7}"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push -qf origin gh-pages

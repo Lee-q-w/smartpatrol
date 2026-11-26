@@ -615,6 +615,85 @@ async def agent_chat_stream(data: dict):
     )
 
 
+# ============================================================
+# MCP 桥接层 —— 让标准 MCP 客户端（Claude/Cursor/TeleAgent 等）
+# 能够查询平台状态并指挥巡检作业
+# ------------------------------------------------------------
+# 数据流：前端定期上报快照 → STATE；MCP Server（server/mcp_server.py，
+# FastMCP streamable-http :8790）经 REST 读取 STATE、POST 指令到
+# 总线；前端经 SSE /api/mcp/events 订阅指令并执行（复用 Agent 动作链）。
+# ============================================================
+import time as _time
+
+STATE: dict = {"updated": 0, "online": False, "data": None}
+_CMD_SUBSCRIBERS: list["asyncio.Queue"] = []
+
+
+@app.post("/api/state")
+async def push_state(data: dict):
+    """前端上报平台状态快照（供 MCP 查询）"""
+    STATE["data"] = data
+    STATE["updated"] = _time.time()
+    STATE["online"] = True
+    return {"ok": True}
+
+
+@app.get("/api/state")
+async def read_state():
+    """读取最新快照（MCP Server / 调试用）；超过 15s 未上报视为前端离线"""
+    fresh = (_time.time() - STATE["updated"]) < 15
+    STATE["online"] = STATE["online"] and fresh
+    return {
+        "online": STATE["online"],
+        "stale": not fresh,
+        "updated": STATE["updated"],
+        "data": STATE["data"],
+    }
+
+
+@app.post("/api/mcp/cmd")
+async def push_mcp_cmd(data: dict):
+    """MCP 指令入总线（type/args），由订阅 /api/mcp/events 的前端执行"""
+    cmd = {
+        "type": data.get("type"),
+        "args": data.get("args") or {},
+        "source": data.get("source") or "mcp",
+        "ts": _time.time(),
+    }
+    if not cmd["type"]:
+        raise HTTPException(400, "type 不能为空")
+    for q in _CMD_SUBSCRIBERS:
+        q.put_nowait(cmd)
+    return {"ok": True, "delivered": len(_CMD_SUBSCRIBERS), "cmd": cmd}
+
+
+@app.get("/api/mcp/events")
+async def mcp_events():
+    """SSE 指令通道：前端订阅后实时接收 MCP 下发的动作指令"""
+    import asyncio
+
+    q: asyncio.Queue = asyncio.Queue()
+    _CMD_SUBSCRIBERS.append(q)
+
+    async def gen():
+        try:
+            yield "data: " + json.dumps({"type": "hello", "args": {}}, ensure_ascii=False) + "\n\n"
+            while True:
+                try:
+                    cmd = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield "data: " + json.dumps(cmd, ensure_ascii=False) + "\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+        finally:
+            _CMD_SUBSCRIBERS.remove(q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Access-Control-Allow-Origin": "*"},
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
 
