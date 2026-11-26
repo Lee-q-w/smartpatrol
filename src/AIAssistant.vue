@@ -1,10 +1,13 @@
 <!-- AIAssistant.vue —— AI 巡检助手「小巡」（右下角悬浮球 + 对话面板）
-     职责：普通话下指令即执行——对话走 /api/agent/chat/stream 流式端点
-     （SSE 逐字渲染 + 回答时检索本地巡检知识库增强），返回结构化 actions
-     （动作白名单：patrol / switch_scene / switch_mode /
-     export_report / mark_resolved / recheck），emit('action') 上抛给 App 执行；
-     后端不可用时自动降级本地规则引擎（离线优先，演示永不掉线），
-     首次降级会引导配置模型 Key。 -->
+      职责：普通话下指令即执行——对话走 /api/agent/chat/stream 流式端点
+      （SSE 逐字渲染 + 回答时检索本地巡检知识库增强），返回结构化 actions
+      （动作白名单：patrol / switch_scene / switch_mode /
+      export_report / mark_resolved / recheck），emit('action') 上抛给 App 执行；
+      后端不可用时自动降级本地规则引擎（离线优先，演示永不掉线），
+      首次降级会引导配置模型 Key。
+      语音交互（多模态）：Web Speech API——SpeechRecognition 语音输入
+      （说“小巡”唤醒/或点麦克风开关）+ speechSynthesis 回复播报，
+      浏览器原生能力零依赖，不支持时按钮隐藏自动降级纯文字。 -->
 <template>
   <div class="assistant">
     <transition name="pop">
@@ -27,9 +30,17 @@
           <button v-for="c in chips" :key="c" :disabled="busy" @click="send(c)">{{ c }}</button>
         </div>
         <div class="input-row">
-          <el-input v-model="input" :placeholder="busy ? '小巡正在回复…' : '试试：全面体检一下'" :disabled="busy"
+          <el-input v-model="input" :placeholder="listening ? '正在听你说话…' : (busy ? '小巡正在回复…' : '试试：全面体检一下')" :disabled="busy || listening"
             @keyup.enter="send()" />
+          <el-button v-if="voiceSupported" :class="['voice-btn', { listening }]" :disabled="busy" @click="toggleListening"
+            :title="listening ? '停止麦克风' : '语音输入'">{{ listening ? '⏹' : '🎤' }}</el-button>
           <el-button type="primary" :loading="busy" @click="send()">发送</el-button>
+        </div>
+        <div v-if="voiceSupported" class="voice-bar" @click="voiceAutoReply = !voiceAutoReply">
+          <span class="voice-state">{{ listening ? '● 正在聆听，松开后发送' : (speaking ? '🔊 小巡播报中' : '语音：说「小巡」唤醒 · 点 🎤 开关麦克风') }}</span>
+          <label class="tts-toggle" @click.stop>
+            <input type="checkbox" v-model="voiceAutoReply" /> 语音播报回复
+          </label>
         </div>
       </div>
     </transition>
@@ -41,7 +52,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { ElButton, ElInput } from 'element-plus'
 
 const props = defineProps({
@@ -149,6 +160,8 @@ async function send(preset) {
     streaming.value = false
     busy.value = false
     scrollToBottom()
+    // 流式回复完成：自动播报（完整口播最终回复）
+    if (current?.text) speak(current.text)
   }
 }
 
@@ -162,12 +175,72 @@ function fallback(text) {
     ? '\n\n💡 小提示：到「AI 识别中心」→「模型配置」填入你的 API Key，就能解锁大模型对话能力。'
     : ''
   reply(d.reply + hint, d.actions)
+  speak(d.reply)   // 规则回复也播报（与流式一致）
 }
 
 function reply(text, actions) {
   messages.value.push({ role: 'ai', text })
   for (const a of actions ?? []) emit('action', a)
 }
+
+// ---------- 语音交互（Web Speech API，多模态：语音输入 + TTS 播报） ----------
+// SpeechRecognition：语音→文字自动填入并发送；唤醒词「小巡」免手点麦克风
+// speechSynthesis：回复自动播报（可关）；浏览器原生零依赖，不支持时整体隐藏
+const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
+const voiceSupported = !!SR && typeof window !== 'undefined' && 'speechSynthesis' in window
+const listening = ref(false)
+const speaking = ref(false)
+const voiceAutoReply = ref(true)
+let recog = null
+
+function stopSpeak() {
+  try { window.speechSynthesis.cancel() } catch { /* noop */ }
+  speaking.value = false
+}
+
+function speak(text) {
+  if (!voiceAutoReply.value || !('speechSynthesis' in window)) return
+  stopSpeak()
+  // 去掉零宽字符与打字光标符号，控制播报长度（太长的流式回复只播开头）
+  const clean = (text || '').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/▌/g, '')
+  const spoken = clean.length > 120 ? clean.slice(0, 120) + '……' : clean
+  const u = new SpeechSynthesisUtterance(spoken)
+  u.lang = 'zh-CN'
+  u.rate = 1.05
+  u.onstart = () => { speaking.value = true }
+  u.onend = u.onerror = () => { speaking.value = false }
+  try { window.speechSynthesis.speak(u) } catch { /* noop */ }
+}
+
+function stopListening() {
+  try { recog?.stop() } catch { /* noop */ }
+  listening.value = false
+}
+
+function toggleListening() {
+  if (listening.value) { stopListening(); return }
+  stopSpeak()
+  recog = new SR()
+  recog.lang = 'zh-CN'
+  recog.interimResults = true
+  recog.continuous = false
+  let finalText = ''
+  recog.onresult = (e) => {
+    let interim = ''
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript
+      else interim += e.results[i][0].transcript
+    }
+    input.value = (finalText || interim).replace(/^\s*小巡[，,。,、]?\s*/, '')
+    // 判定：含唤醒词或已出终稿即自动发送（免手点）
+    if (finalText) { stopListening(); setTimeout(() => send(), 120) }
+  }
+  recog.onerror = () => { listening.value = false }
+  recog.onend = () => { listening.value = false }
+  try { recog.start(); listening.value = true } catch { listening.value = false }
+}
+
+onBeforeUnmount(() => { stopListening(); stopSpeak() })
 
 // ---------- 本地规则引擎 ----------
 // 意图解析顺序：查询直答 → 场景切换 → 数据源切换 → 巡逻（全面/分区/方式）
