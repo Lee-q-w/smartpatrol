@@ -21,9 +21,9 @@
 //   4. 连接状态通过自定义事件 'real' 广播：{state, text?, device?}
 //      state: offline | connecting | connected | error
 // ============================================================
-import { CommandType, EventType } from '../core/protocol.js'
+import { CommandType, EventType } from '../core/protocol'
 import { PARK_SCENE } from '../scenes/park.js'
-import { buildMission } from '../scenes/sceneSchema.js'
+import { buildMission } from '../scenes/sceneSchema'
 
 const MODE_NAME = { quick: '快速巡逻', point: '定点详查', sweep: '环视检查' }
 

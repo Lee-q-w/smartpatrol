@@ -6,7 +6,7 @@
 // 事件：progress（进度 0-1）+ replay（{state, t, duration} 播放器状态）
 // 叙事：异常按 detected → rechecking → confirmed 推进，无人机复核后返航
 // ============================================================
-import { CommandType, EventType } from '../core/protocol.js'
+import { CommandType, EventType } from '../core/protocol'
 import { PARK_SCENE } from '../scenes/park.js'
 
 const ANOMS = PARK_SCENE.anomalies

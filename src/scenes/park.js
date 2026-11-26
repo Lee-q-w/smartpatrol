@@ -3,7 +3,7 @@
 // 世界 60m × 40m，原点左上，x 向东 y 向南
 // 含省赛 seed=2026 真实异常真值与证据帧
 // ============================================================
-import { ANOMALY_TYPE_META } from './sceneSchema.js'
+import { ANOMALY_TYPE_META } from './sceneSchema'
 
 export const PARK_SCENE = {
   id: 'park',

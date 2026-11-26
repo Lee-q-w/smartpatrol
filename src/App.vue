@@ -261,7 +261,7 @@ import AIAssistant from './AIAssistant.vue'
 import HomeView from './HomeView.vue'
 import SplashScreen from './SplashScreen.vue'
 import { useDataSource, DataSourceMode } from './composables/useDataSource.js'
-import { useMcpBridge } from './composables/useMcpBridge.js'
+import { useMcpBridge } from './composables/useMcpBridge'
 import { PATROL_MODES } from './parkData.js'
 import { DRONE_FRAME } from './parkData.js'
 const DRONE_FRAME_REF = DRONE_FRAME.ref   // 无人机俯拍复核帧（省赛实录，仅园区）

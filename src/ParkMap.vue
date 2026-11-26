@@ -11,7 +11,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { anomalyMeta, kindOf } from './scenes/sceneSchema.js'
+import { anomalyMeta, kindOf } from './scenes/sceneSchema'
 
 const props = defineProps({
   scene: { type: Object, required: true },        // 当前巡检场景（Scene JSON）

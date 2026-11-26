@@ -15,11 +15,11 @@
 //     sweep  环视检查 —— 到点后原地转四朝向各拍一张
 //   重点复查 recheck：{anomalyId} 单点 或 {all:true} 全部，无人机中途可出动
 // ============================================================
-import { CommandType, EventType } from '../core/protocol.js'
+import { CommandType, EventType } from '../core/protocol'
 import { PARK_SCENE } from '../scenes/park.js'
 import {
   buildMission, getPointAnomalyMap, anomaliesByZone, findAnomalyIndexByType,
-} from '../scenes/sceneSchema.js'
+} from '../scenes/sceneSchema'
 
 // 工单流转文案（未处理→处理中→已处理，可退回/重开）
 export const HANDLE_TEXT = {

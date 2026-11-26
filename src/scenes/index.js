@@ -2,11 +2,11 @@
 // 场景注册表 —— 内置场景 + 自建场景（localStorage）管理
 // ============================================================
 import { PARK_SCENE } from './park.js'
-import { validateScene } from './sceneSchema.js'
+import { validateScene } from './sceneSchema'
 
 export { PARK_SCENE } from './park.js'
 export { WAREHOUSE_SCENE } from './warehouse.js'
-export * from './sceneSchema.js'
+export * from './sceneSchema'
 
 import { WAREHOUSE_SCENE } from './warehouse.js'
 

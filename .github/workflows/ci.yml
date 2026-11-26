@@ -21,6 +21,8 @@ jobs:
           cache: pnpm
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
+      - name: 类型检查（TypeScript）
+        run: pnpm typecheck
       - name: 生产构建
         run: pnpm build
 

@@ -3,7 +3,7 @@
 // 世界 40m × 30m；演示"任意场地可建图"：非户外、无无人机也能巡检
 // 异常真值为演示数据，证据照片待真图识别接入后采集补充
 // ============================================================
-import { ANOMALY_TYPE_META } from './sceneSchema.js'
+import { ANOMALY_TYPE_META } from './sceneSchema'
 
 export const WAREHOUSE_SCENE = {
   id: 'warehouse',

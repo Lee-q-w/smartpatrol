@@ -117,7 +117,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElButton, ElCard, ElDialog, ElInput, ElMessage, ElProgress, ElTag } from 'element-plus'
-import { anomalyMeta } from './scenes/sceneSchema.js'
+import { anomalyMeta } from './scenes/sceneSchema'
 
 const props = defineProps({
   scene: { type: Object, required: true },   // 当前巡检场景
