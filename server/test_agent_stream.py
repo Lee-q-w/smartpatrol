@@ -92,7 +92,8 @@ CAPTURED["chunks"] = [
 frames = post_stream("全面体检一下")
 text, final = collect(frames)
 assert "ACT" not in text and "ACTIONS" not in text, f"截断标记泄漏: {text!r}"
-assert final and final["actions"] == [], f"空动作应解析为 []: {final}"
+# 模型给了空动作数组时，规则引擎兜底补发巡检意图（双引擎策略）
+assert final and any(a["type"] == "patrol" for a in final["actions"]), f"空动作应由规则引擎兜底: {final}"
 print(f"用例2 ACTIONS 跨块截断: 通过（正文={text!r}）")
 
 # 用例 3：旧 JSON 协议兼容（模型仍输出 {"reply":...}）

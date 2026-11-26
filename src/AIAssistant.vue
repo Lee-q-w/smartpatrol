@@ -24,7 +24,12 @@
           <div v-for="(m, i) in messages" :key="i" class="msg" :class="m.role">
             <div class="bubble" :class="{ streaming: streaming && m.role === 'ai' && i === messages.length - 1 }">{{ m.text }}</div>
           </div>
-          <div v-if="busy && !streaming" class="msg ai"><div class="bubble typing">小巡思考中…</div></div>
+          <div v-if="busy && !streaming && !thinkSteps.length" class="msg ai"><div class="bubble typing">小巡思考中…</div></div>
+          <div v-if="thinkSteps.length" class="think-chain">
+            <div v-for="s in thinkSteps" :key="s.key" class="think-step" :class="s.state">
+              <span class="tdot"></span><span class="ttext">{{ s.text }}</span>
+            </div>
+          </div>
         </div>
         <div class="chips">
           <button v-for="c in chips" :key="c" :disabled="busy" @click="send(c)">{{ c }}</button>
@@ -66,6 +71,7 @@ const open = ref(false)
 const input = ref('')
 const busy = ref(false)
 const streaming = ref(false)                    // 流式逐字渲染中
+const thinkSteps = ref([])                     // 思考链步骤（后端 stage 帧，真实阶段）
 const engine = ref('ai')                        // ai 大模型 / rule 离线规则
 const messages = ref([])
 const listRef = ref(null)
@@ -102,6 +108,7 @@ async function send(preset) {
   const text = String(preset ?? input.value).trim()
   if (!text || busy.value) return
   input.value = ''
+  thinkSteps.value = []                          // 新一轮思考链
   messages.value.push({ role: 'user', text })
   scrollToBottom()
   busy.value = true
@@ -136,6 +143,14 @@ async function send(preset) {
           let obj
           try { obj = JSON.parse(payload) } catch { continue }
           if (obj.error) { gotError = true; continue }
+          if (obj.stage) {
+            // 思考链真实阶段：之前步骤全部标完成，追加以当前阶段为 active 的新步骤
+            const all = thinkSteps.value.map(s => ({ ...s, state: 'done' }))
+            all.push({ key: obj.stage, text: obj.text, state: 'active' })
+            thinkSteps.value = all
+            scrollToBottom()
+            continue
+          }
           if (obj.reset) {
             // 模型输出了旧 JSON 协议：正文替换为纯回复
             if (!current) { current = { role: 'ai', text: '' }; messages.value.push(current) }
@@ -143,7 +158,11 @@ async function send(preset) {
             continue
           }
           if (typeof obj.delta === 'string' && obj.delta) {
-            if (!current) { current = { role: 'ai', text: '' }; messages.value.push(current); streaming.value = true }
+            if (!current) {
+              current = { role: 'ai', text: '' }; messages.value.push(current); streaming.value = true
+              // 推理开始产出：当前 active 步骤（推理）标完成
+              thinkSteps.value = thinkSteps.value.map(s => s.state === 'active' ? { ...s, state: 'done' } : s)
+            }
             current.text += obj.delta
             scrollToBottom()
           }
@@ -160,6 +179,11 @@ async function send(preset) {
     streaming.value = false
     busy.value = false
     scrollToBottom()
+    // 思考链收尾：全部标完成，短暂停留（2s）便于用户看清「检索→推理→执行」全过程后淡出
+    if (thinkSteps.value.length) {
+      thinkSteps.value = thinkSteps.value.map(s => ({ ...s, state: 'done' }))
+      setTimeout(() => { thinkSteps.value = [] }, 2000)
+    }
     // 流式回复完成：自动播报（完整口播最终回复）
     if (current?.text) speak(current.text)
   }
@@ -367,6 +391,18 @@ function ruleReply(t, ctx) {
 .msg.ai .bubble { background: #f4f6f9; color: #303133; border-top-left-radius: 2px; }
 .msg.user .bubble { background: linear-gradient(135deg, #409eff, #5aadff); color: #fff; border-top-right-radius: 2px; }
 .bubble.typing { color: #909399; font-style: italic; }
+/* Agent 思考链（真实阶段：检索→推理→执行） */
+.think-chain { display: flex; flex-direction: column; gap: 7px; padding: 10px 14px; }
+.think-step { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #909399; }
+.think-step .tdot {
+  width: 9px; height: 9px; border-radius: 50%; flex: none;
+  background: #dcdfe6; transition: all .3s;
+}
+.think-step.active { color: #409eff; }
+.think-step.active .tdot { background: #409eff; animation: think-pulse 1s ease-in-out infinite; }
+.think-step.done { color: #a8abb2; }
+.think-step.done .tdot { background: #67c23a; box-shadow: 0 0 0 3px rgba(103, 194, 58, .15); }
+@keyframes think-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(64,158,255,.4); } 50% { box-shadow: 0 0 0 6px rgba(64,158,255,0); } }
 /* 流式打字光标 */
 .bubble.streaming::after { content: '▌'; color: #409eff; animation: cursor-blink 1s step-start infinite; }
 @keyframes cursor-blink { 50% { opacity: 0; } }
@@ -379,6 +415,17 @@ function ruleReply(t, ctx) {
 .chips button:disabled { opacity: 0.5; cursor: not-allowed; }
 .input-row { display: flex; gap: 8px; padding: 10px 14px 12px; }
 .input-row .el-input { flex: 1; }
+/* 语音交互 */
+.voice-btn { padding: 8px 10px; font-size: 16px; line-height: 1; }
+.voice-btn.listening { background: #ecf5ff; border-color: #409eff; animation: mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { box-shadow: 0 0 0 4px rgba(64, 158, 255, 0.18); } }
+.voice-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 0 14px 10px; font-size: 11px; color: #909399; cursor: pointer; user-select: none;
+}
+.voice-state { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tts-toggle { display: flex; align-items: center; gap: 4px; white-space: nowrap; color: #909399; }
+.tts-toggle input { margin: 0; cursor: pointer; }
 /* 弹出动画 */
 .pop-enter-active, .pop-leave-active { transition: all .25s ease; }
 .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(12px) scale(.96); }
@@ -392,3 +439,4 @@ function ruleReply(t, ctx) {
 :global(.app[data-theme='dark']) .chips button:hover { background: #1d3350; }
 :global(.app[data-theme='dark']) .close-btn:hover { background: #14273d; color: #9fb8d4; }
 </style>
+

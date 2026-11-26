@@ -468,7 +468,14 @@ STREAM_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡
 
 输出格式（严格遵守）：
 第一行起：给用户的简短中文回复，1-2 句，口语化纯文本（不要 JSON、不要 markdown、不要换行符转义）。
-回复结束后，另起一行输出：ACTIONS: [动作对象数组]，无动作为 ACTIONS: []
+回复结束后，必须另起一行输出动作数组，格式：ACTIONS: [动作对象数组]，无动作时也要输出 ACTIONS: []。
+示例 1（派发任务）：
+好的，这就对西南分区发起定点详查。
+ACTIONS: [{{"type":"patrol","args":{{"zoneIds":["zone-c"],"mode":"point"}}}}]
+示例 2（仅查询）：
+本轮发现 3 处异常，其中待处理 2 处。
+ACTIONS: []
+注意：只要回复里说了“这就/帮您”执行某操作，就必须在 ACTIONS 行给出对应动作对象，不能只在口播中表述。
 
 规则：
 1. 任务进行中（phase 不为 idle/report）时不发起 patrol，回复请用户稍候
@@ -482,6 +489,41 @@ STREAM_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡
 
 def _sse(obj: dict) -> str:
     return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+
+
+def _local_fallback_actions(text: str, ctx: dict) -> list[dict]:
+    """模型未输出 ACTIONS 协议时的本地意图解析兑底（双引擎：模型决策优先，规则引擎保底）。
+    与前端离线规则引擎同语义：查询类不触发动作，指令类按关键词+分区表解析。"""
+    t = text or ""
+    actions: list[dict] = []
+    # 查询类：不产生动作
+    if any(k in t for k in ("异常", "问题", "情况", "多少")) and not any(k in t for k in ("巡", "查一查", "检查", "体检", "处置", "导出")):
+        return actions
+    zones = [z for z in (ctx.get("zones") or []) if isinstance(z, dict)]
+    # 巡逻
+    if any(k in t for k in ("巡逻", "巡检", "巡查", "检查", "体检", "详查", "查一查", "看一遍", "看下")):
+        mode = "point" if ("详查" in t or "定点" in t) else ("sweep" if "环视" in t else "quick")
+        zone_hit = next((z for z in zones if z.get("name") and z["name"].replace("分区", "") and z["name"].replace("分区", "") in t), None)
+        if zone_hit:
+            actions.append({"type": "patrol", "args": {"zoneIds": [zone_hit["id"]], "mode": mode}})
+        else:
+            actions.append({"type": "patrol", "args": {"mode": mode}})
+    # 报告 / 处置 / 复核 / 场景 / 数据源
+    if any(k in t for k in ("报告", "导出", "PDF", "pdf")):
+        actions.append({"type": "export_report", "args": {}})
+    if any(k in t for k in ("处理完", "已处理", "标记", "解决")):
+        actions.append({"type": "mark_resolved", "args": {"all": True}})
+    if any(k in t for k in ("复核", "复查")):
+        actions.append({"type": "recheck", "args": {"all": True}})
+    for kw, target in (("仓库", "warehouse"), ("园区", "park")):
+        if kw in t and ctx.get("sceneId") != target:
+            actions.append({"type": "switch_scene", "args": {"sceneId": target}})
+            break
+    for kw, m in (("真机", "real"), ("回放", "replay"), ("仿真", "sim")):
+        if kw in t and ctx.get("mode") != m:
+            actions.append({"type": "switch_mode", "args": {"mode": m}})
+            break
+    return actions
 
 
 def _parse_stream_output(full: str, actions_raw: str | None) -> tuple[str, list[dict]]:
@@ -505,7 +547,7 @@ def _parse_stream_output(full: str, actions_raw: str | None) -> tuple[str, list[
 
 @app.post("/api/agent/chat/stream")
 async def agent_chat_stream(data: dict):
-    """SSE 流式助手：delta 帧（逐字回复）→ 结果帧（actions/sources/done）→ [DONE]"""
+    """SSE 流式助手：stage 帧（思考链）→ delta 帧（逐字回复）→ 结果帧（actions/sources/done）→ [DONE]"""
 
     async def gen():
         if not (CFG.get("api_key") and CFG.get("base_url")):
@@ -519,7 +561,21 @@ async def agent_chat_stream(data: dict):
             return
         messages = [m for m in messages if isinstance(m, dict) and m.get("role") in ("user", "assistant")][-8:]
         ctx = data.get("context") or {}
+        # 思考链阶段 1：知识库检索（真实执行 BM25 检索）
+        yield _sse({"stage": "retrieve", "text": "检索巡检知识库…"})
         kb_block, kb_sources = _rag_block(_last_user_text(messages))
+        # 阶段 2：模型推理（据检索结果如实描述）
+        yield _sse({"stage": "reason",
+                    "text": (f"命中 {len(kb_sources)} 篇参考（{('、'.join(kb_sources[:2]))}…）" if kb_sources else "未命中知识库，按平台状态推理") + "，组织回复…"})
+        # 阶段 3：动作决策（模型协议优先，本地意图解析兜底；先决策再作答，符合“检索→推理→执行→回复”链路）
+        user_text = _last_user_text(messages)
+        planned = _local_fallback_actions(user_text, ctx)
+        action_names = {"patrol": "发起巡检", "switch_mode": "切换数据源", "switch_scene": "切换场景",
+                        "export_report": "导出报告", "mark_resolved": "标记处置", "recheck": "无人机复核",
+                        "workorder": "工单流转"}
+        if planned:
+            yield _sse({"stage": "act",
+                        "text": "解析指令 → 计划执行：" + "、".join(action_names.get(a["type"], a["type"]) for a in planned)})
         payload = {
             "model": CFG.get("model", "agnes-3.0-flash"),
             "messages": [
@@ -600,6 +656,15 @@ async def agent_chat_stream(data: dict):
                 yield _sse({"delta": full[sent:]})
 
         reply, actions = _parse_stream_output(full, actions_raw)
+        # 双引擎兜底：模型口播有执行意图但未输出动作协议时，本地规则解析补发
+        used_fallback = False
+        if not actions:
+            if planned:
+                actions = planned
+                used_fallback = True
+        # 阶段 3b：模型自主输出协议且与本地预判不一致时，补播真实动作
+        if actions and not used_fallback and actions != planned:
+            yield _sse({"stage": "act", "text": f"执行 {len(actions)} 个动作：" + "、".join(action_names.get(a["type"], a["type"]) for a in actions)})
         # 兼容模式：模型输出了旧 JSON 协议，正文已被流成 JSON 字符——发 reset 帧让前端替换为纯回复
         if actions_raw is None and full.lstrip().startswith("{"):
             yield _sse({"reset": True, "reply": reply})
