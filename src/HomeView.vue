@@ -47,7 +47,7 @@
           <b class="ov-v">{{ sceneName }}</b>
           <span class="ov-sub">{{ sceneCount }} 个场地可切换</span>
         </div>
-        <div class="ov-cell" :class="stats.pending > 0 ? 'warn glow' : 'ok'">
+        <div class="ov-cell" :class="{ 'warn glow': stats.pending > 0 }">
           <span class="ov-k">待处理异常</span>
           <b class="ov-v">{{ stats.pending }}</b>
           <span class="ov-sub">{{ stats.pending > 0 ? '点击「实时巡检」去处置' : '暂无待办，一切正常' }}</span>
@@ -117,7 +117,7 @@ const phaseText = computed(() => ({
 .home-view { display: flex; flex-direction: column; gap: 18px; padding: 8px 4px 0; }
 /* 问候与行动条 */
 .greet-bar {
-  background: linear-gradient(120deg, #ecf5ff 0%, #f4f9ff 55%, #fdf6ec 100%);
+  background: linear-gradient(120deg, #ecf5ff 0%, #f2f8ff 55%, #e8f2fe 100%);
   border-radius: 14px; padding: 16px 24px; display: flex; align-items: center; gap: 20px;
   box-shadow: 0 2px 12px rgba(0,0,0,.05), inset 0 0 0 1px rgba(31,45,61,.04);
 }
@@ -168,9 +168,9 @@ const phaseText = computed(() => ({
 .ov-actions { display: none; }
 .big-cta {
   border: none; cursor: pointer; border-radius: 12px; padding: 14px 18px; font-size: 15px; font-weight: 600; color: #fff;
-  background: linear-gradient(135deg, #409eff, #2a6aa8); box-shadow: 0 6px 18px rgba(64,158,255,.35); transition: all .2s;
+  background: linear-gradient(135deg, #4a9dff, #3b86d4); box-shadow: 0 3px 9px rgba(42,106,168,.16); transition: all .2s;
 }
-.big-cta:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(64,158,255,.45); }
+.big-cta:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(42,106,168,.24); }
 .cta-sub { text-align: center; font-size: 11.5px; color: #c0c4cc; }
 /* 窄屏降级 */
 @media (max-width: 1180px) {
@@ -180,7 +180,7 @@ const phaseText = computed(() => ({
   .ov-grid { grid-template-columns: repeat(2, 1fr); }
 }
 /* 深色主题 */
-.app[data-theme='dark'] .greet-bar { background: linear-gradient(120deg, #12233a 0%, #101d2d 55%, rgba(230,162,60,.08) 100%); box-shadow: 0 4px 18px rgba(0,0,0,.35), inset 0 0 0 1px rgba(64,158,255,.08); }
+.app[data-theme='dark'] .greet-bar { background: linear-gradient(120deg, #12233a 0%, #101d2d 55%, rgba(64,158,255,.08) 100%); box-shadow: 0 4px 18px rgba(0,0,0,.35), inset 0 0 0 1px rgba(64,158,255,.08); }
 .app[data-theme='dark'] .greet-left h2 { color: #e8f0ff; text-shadow: 0 0 18px rgba(64,158,255,.35); }
 .app[data-theme='dark'] .greet-status { color: #9fb8d4; }
 .app[data-theme='dark'] .greet-tags span { background: #14273d; border-color: #1d3350; color: #8fb0d0; }
