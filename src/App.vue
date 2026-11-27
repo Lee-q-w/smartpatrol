@@ -295,8 +295,8 @@ const patrolMode = ref('quick')  // 巡查方式：quick / point / sweep
 const weather = ref('clear')
 const WEATHER_MODES = {
   clear: { label: '晴', icon: '☀', hint: '' },
-  rain: { label: '小雨', icon: '🌦', hint: '小雨：地面反光影响判读，植被类异常暂缓派单，复核比例建议提高' },
-  storm: { label: '大雨', icon: '🌧', hint: '大雨：无人机复核暂停，植被类点位跳过，优先通道占用与积水内涝' },
+  rain: { label: '小雨', icon: '🌦', hint: '小雨：烟头只查雨棚连廊等遮蔽处，不判植被缺水，绿地积水按积水内涝判' },
+  storm: { label: '大雨', icon: '🌧', hint: '大雨：无人机复核暂停；判积水内涝、通道占用、排水口堵塞，不判缺水与烟头' },
 }
 const weatherHint = computed(() => WEATHER_MODES[weather.value]?.hint ?? '')
 const eviDialogRef = ref(null)
@@ -586,9 +586,9 @@ function startPatrol() {
   dispatch('patrol', { zoneIds: zoneIds.value, mode: patrolMode.value })
   // 雨天作业：把降级策略写进命令流，让过程可追溯（也便于报告与答辩说明）
   if (weather.value === 'storm') {
-    cmdLog.value.push({ ts: Date.now(), text: '🌧 大雨模式：无人机复核暂停，植被类点位跳过，优先通道占用与积水内涝' })
+    cmdLog.value.push({ ts: Date.now(), text: '🌧 大雨模式：不判缺水与烟头，重点看积水内涝/通道占用/排水口堵塞，无人机复核暂停' })
   } else if (weather.value === 'rain') {
-    cmdLog.value.push({ ts: Date.now(), text: '🌦 小雨模式：地面反光影响判读，植被类暂缓派单，建议提高复核比例' })
+    cmdLog.value.push({ ts: Date.now(), text: '🌦 小雨模式：烟头只查雨棚连廊等遮蔽处，绿地积水按积水内涝判' })
   }
 }
 

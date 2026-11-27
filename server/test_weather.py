@@ -12,12 +12,21 @@ ctx_storm = {"sceneId": "park", "sceneName": "智慧园区", "mode": "sim", "pha
 block = main_mod._build_context_block(ctx_storm)
 assert "作业环境：大雨" in block, f"缺作业环境行: {block[:200]}"
 assert "无人机无法起飞" in block and "禁止 recheck" in block, f"缺大雨约束: {block}"
+# 判定项口径：雨天不是降低精度，而是判定项启停
+assert "不判 dry" in block and "不判 cigarette" in block, f"缺大雨判定项启停: {block}"
+assert "waterlogging" in block, f"大雨应启用积水内涝: {block}"
 print("上下文天气约束: 通过")
 
 ctx_clear = dict(ctx_storm, weather="clear")
 block_clear = main_mod._build_context_block(ctx_clear)
 assert "作业环境：晴" in block_clear and "禁止 recheck" not in block_clear
 print("晴天无额外约束: 通过")
+
+# 小雨：烟头收窄到遮蔽空间，不判缺水
+block_rain = main_mod._build_context_block(dict(ctx_storm, weather="rain"))
+assert "雨棚" in block_rain and "不判 dry" in block_rain, f"小雨口径异常: {block_rain}"
+assert "禁止 recheck" not in block_rain, "小雨不应禁用复核"
+print("小雨判定项收窄: 通过（烟头仅遮蔽处）")
 
 # ---------- 2. 规则引擎：大雨不下发无人机复核 ----------
 act_storm = main_mod._local_fallback_actions("帮我复核一遍", ctx_storm)
@@ -46,7 +55,9 @@ print("报告环境标注: 通过（作业环境 / 环境降级 / 积水异常�
 # ---------- 4. 积水内涝类型可识别 ----------
 assert "waterlogging" in main_mod.SYSTEM_PROMPT, "识别提示词缺积水类型"
 assert main_mod.TYPE_ALIASES.get("waterlogging"), "缺积水别名映射"
-print("积水内涝类型: 通过")
+assert "绿地积水" in main_mod.SYSTEM_PROMPT, "积水判定应覆盖绿地积水"
+assert "不得判为 dry" in main_mod.SYSTEM_PROMPT, "识别提示词应禁止雨天判缺水"
+print("积水内涝类型: 通过（含绿地积水 / 雨天禁判缺水）")
 
 # ---------- 5. 大雨复核短路（不调模型，直接给降级话术） ----------
 g = main_mod._storm_recheck_guard("帮我把异常复核一下", ctx_storm)
