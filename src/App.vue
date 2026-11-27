@@ -246,23 +246,37 @@
               <span class="ts-item primary">处理中 {{ handleStats.processing }}</span>
               <span class="ts-item success">已处理 {{ handleStats.resolved }}</span>
             </div>
-            <div v-for="a in anomalies" :key="a.id" class="finding clickable" :style="{ borderLeftColor: typeColor(a.type) }" @click="openEvidence(a)">
-              <div class="f-head">
-                <span class="f-icon">{{ typeIcon(a.type) }}</span>
-                <b>{{ a.label }}</b>
-                <el-tag size="small" :type="a.stage === 'confirmed' ? 'danger' : 'info'">
-                  {{ a.stage === 'confirmed' ? '已复核' : a.stage === 'rechecking' ? '复核中' : '初判' }} {{ Math.round(a.confidence * 100) }}%
-                </el-tag>
+            <!-- 摘要条：进度 + 关键数字（异常数 / 已复核 / 已处置），清单可展开 -->
+            <div class="rep-summary" @click="listOpen = !listOpen" role="button" :aria-expanded="listOpen">
+              <div class="rs-bar">
+                <div class="rs-fill" :style="{ width: repProgress }"></div>
               </div>
-              <div class="f-place">📍 {{ a.near }} <span class="view-evi">查看证据照片 →</span></div>
-              <div class="f-evi">{{ a.evidence }}</div>
-              <div class="f-foot" @click.stop>
-                <el-tag size="small" :type="ticketTagType(a)" effect="light" round>
-                  📋 {{ ticketLabel(a) }}
-                </el-tag>
-                <el-button size="small" text type="primary" :disabled="isReplay" @click="handleTicket(a)">
-                  {{ ticketBtnText(a) }}
-                </el-button>
+              <div class="rs-nums">
+                <span>发现 <b>{{ anomalies.length }}</b></span>
+                <span>已复核 <b>{{ confirmedCount }}</b></span>
+                <span>已处置 <b>{{ handleStats.resolved }}</b></span>
+                <span class="rs-toggle">{{ listOpen ? '收起清单 ▴' : `展开 ${anomalies.length} 处 ▾` }}</span>
+              </div>
+            </div>
+            <div v-show="listOpen" class="finding-list">
+              <div v-for="a in anomalies" :key="a.id" class="finding clickable" :style="{ borderLeftColor: typeColor(a.type) }" @click="openEvidence(a)">
+                <div class="f-head">
+                  <span class="f-icon">{{ typeIcon(a.type) }}</span>
+                  <b>{{ a.label }}</b>
+                  <el-tag size="small" :type="a.stage === 'confirmed' ? 'danger' : 'info'">
+                    {{ a.stage === 'confirmed' ? '已复核' : a.stage === 'rechecking' ? '复核中' : '初判' }} {{ Math.round(a.confidence * 100) }}%
+                  </el-tag>
+                </div>
+                <div class="f-place">📍 {{ a.near }} <span class="view-evi">查看证据照片 →</span></div>
+                <div class="f-evi">{{ a.evidence }}</div>
+                <div class="f-foot" @click.stop>
+                  <el-tag size="small" :type="ticketTagType(a)" effect="light" round>
+                    📋 {{ ticketLabel(a) }}
+                  </el-tag>
+                  <el-button size="small" text type="primary" :disabled="isReplay" @click="handleTicket(a)">
+                    {{ ticketBtnText(a) }}
+                  </el-button>
+                </div>
               </div>
             </div>
           </template>
@@ -370,6 +384,15 @@ const handleStats = computed(() => {
   const s = { pending: 0, processing: 0, resolved: 0 }
   for (const a of anomalies.value) s[a.handle?.status ?? 'pending']++
   return s
+})
+
+// —— 巡检报告卡：摘要 + 可展开清单 ——
+const listOpen = ref(false)   // 异常清单默认折叠（摘要优先，细节按需展开）
+const confirmedCount = computed(() => anomalies.value.filter(a => a.stage === 'confirmed').length)
+const repProgress = computed(() => {
+  if (!anomalies.value.length) return '0%'
+  // 处置完成度：已处置 / 总数（进度条填充）
+  return Math.round((handleStats.value.resolved / anomalies.value.length) * 100) + '%'
 })
 
 // —— AI 巡检助手：平台运行状态上报（供意图解析） ——
@@ -916,6 +939,14 @@ html, body, #app { height: 100%; }
 .ts-item.warning { color: #e6a23c; background: #fdf6ec; }
 .ts-item.primary { color: #409eff; background: #ecf5ff; }
 .ts-item.success { color: #67c23a; background: #f0f9eb; }
+/* 报告卡摘要条（默认折叠清单） */
+.rep-summary { cursor: pointer; border: 1px solid #e4e9f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: #fafcfe; transition: border-color .18s; user-select: none; }
+.rep-summary:hover { border-color: #409eff; }
+.rs-bar { height: 6px; border-radius: 4px; background: #eef2f6; overflow: hidden; margin-bottom: 8px; }
+.rs-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #67c23a, #4aa8e0); transition: width .4s; }
+.rs-nums { display: flex; align-items: center; gap: 14px; font-size: 12px; color: #909399; }
+.rs-nums b { color: #1f2d3d; font-size: 14px; margin-left: 2px; }
+.rs-nums .rs-toggle { margin-left: auto; color: #409eff; white-space: nowrap; font-size: 12px; }
 .footer { text-align: center; color: #909399; font-size: 12px; padding: 26px 0 10px; }
 @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
