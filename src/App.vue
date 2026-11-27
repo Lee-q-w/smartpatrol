@@ -220,8 +220,9 @@
         <el-card class="log-card">
           <template #header><b>命令流</b><span class="log-count">{{ cmdLog.length }}</span></template>
           <div class="cmd-stream">
-            <div v-for="(l, i) in cmdLog.slice().reverse()" :key="l.ts + '-' + i" class="log-line">
+            <div v-for="(l, i) in cmdTimeline" :key="l.ts + '-' + i" class="log-line" :class="[cmdKind(l.text).cls, { 'round-start': l.round }]">
               <span class="log-ts">{{ fmtTs(l.ts) }}</span>
+              <span class="log-ic" :title="cmdKind(l.text).label">{{ cmdKind(l.text).icon }}</span>
               <span class="log-text">{{ l.text }}</span>
             </div>
             <div v-if="!cmdLog.length" class="log-empty">等待命令…</div>
@@ -547,6 +548,22 @@ onBeforeUnmount(() => { if (clockTimer) clearInterval(clockTimer) })
 
 const recentLogs = computed(() => cmdLog.value.slice(-14).reverse())
 
+// 时间线视图：倒序展示时标记「组首」（正序视角中的新一轮任务），配合缩进形成视觉归组
+// round=false → 组首（新一轮任务开头，正序视角），round=true → 同轮内
+const cmdTimeline = computed(() => {
+  const list = cmdLog.value.slice(-60).reverse()
+  // 先在正序上计算每行是否属于某轮
+  const inRound = new Array(list.length).fill(false)
+  let open = false
+  for (let j = list.length - 1; j >= 0; j--) {
+    if (isRoundStart(list[j].text)) { open = true; inRound[j] = true }
+    else if (open && /本轮.*完成|生成巡检报告|返回停靠点/.test(list[j].text)) { inRound[j] = true; open = false }
+    else inRound[j] = open
+  }
+  // 倒序视角：非组首 → 缩进
+  return list.map((l, i) => ({ ...l, round: inRound[i] }))
+})
+
 // 情报行语义染色（告警/确认/完成/工单一目了然）
 function feedTone(text) {
   if (/发现|疑似|⚠/.test(text)) return 'tone-warn'
@@ -554,6 +571,25 @@ function feedTone(text) {
   if (/报告|完成|✅/.test(text)) return 'tone-done'
   if (/工单/.test(text)) return 'tone-ticket'
   return ''
+}
+
+// —— 命令流时间线：按阶段分类（图标 + 色系），一轮任务内缩进归组 ——
+const CMD_KINDS = [
+  { re: /(收到|规划).*(任务|路线)|前往|返回停靠点|已到达|补给/, icon: '🚗', cls: 'k-move', label: '行车' },
+  { re: /停靠.*检查|环视拍照|拍照识别|检查完成/, icon: '🔍', cls: 'k-check', label: '识别' },
+  { re: /发现|疑似|⚠|待复核|无人机.*(复查|复核|飞往)/, icon: '🚁', cls: 'k-recheck', label: '复核' },
+  { re: /工单更新|标记处置|派单/, icon: '🧾', cls: 'k-ticket', label: '工单' },
+  { re: /报告|生成巡检|本轮.*完成/, icon: '📄', cls: 'k-report', label: '报告' },
+  { re: /雨|天气|🌧|🌦/, icon: '🌧', cls: 'k-weather', label: '环境' },
+  { re: /就绪|充电|电量/, icon: '⚙', cls: 'k-sys', label: '系统' },
+]
+function cmdKind(text) {
+  for (const k of CMD_KINDS) if (k.re.test(text)) return k
+  return { icon: '•', cls: 'k-misc', label: '其他' }
+}
+// 一轮任务的边界：以「收到…任务」行开启新组
+function isRoundStart(text) {
+  return /收到.*(任务|指令)/.test(text) && !/充电|补给/.test(text)
 }
 
 async function enterScreen() {
@@ -810,7 +846,17 @@ html, body, #app { height: 100%; }
 .log-count { margin-left: 8px; color: #909399; font-size: 12px; }
 .cmd-stream { flex: none; font-size: 12px; }
 .log-line { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px dashed #f0f0f0; animation: fade-in .3s; }
+.log-line.round-start { margin-top: 5px; border-top: 1px solid #ebeef5; padding-top: 6px; }
+.log-line:not(.round-start) { padding-left: 10px; border-left: 2px solid #f4f6f9; margin-left: 6px; }
 .log-ts { color: #c0c4cc; flex: none; }
+.log-ic { flex: none; font-size: 11px; width: 16px; text-align: center; filter: grayscale(.15); }
+.log-line.k-move .log-ic { filter: none; }
+.log-line.k-check .log-text { color: #7a4d00; }
+.log-line.k-recheck .log-text { color: #6b4fa0; }
+.log-line.k-ticket .log-text { color: #2f6b3a; }
+.log-line.k-report .log-text { color: #1f6ac0; font-weight: 500; }
+.log-line.k-weather .log-text { color: #b26a00; background: #fdf6ec; border-radius: 4px; padding: 0 4px; }
+.log-line.k-sys .log-text { color: #909399; }
 .log-text { color: #606266; }
 .log-empty { color: #c0c4cc; text-align: center; padding: 20px 0; }
 .ok-badge { margin-left: 10px; color: #67c23a; font-size: 13px; }
