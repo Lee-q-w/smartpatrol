@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="app" :data-theme="theme">
     <SplashScreen v-if="splashShown" @done="splashShown = false" />
     <header class="header">
@@ -238,9 +238,16 @@
           <div class="mode-tip" v-if="isReal">真机模式：异常由 AI 识别摄像头画面产生，点击报告可查看实拍证据</div>
         </el-card>
 
-        <el-card class="log-card">
-          <template #header><b>命令流</b><span class="log-count">{{ cmdLog.length }}</span></template>
-          <div class="cmd-stream">
+        <el-card class="log-card" :class="{ collapsed: !logOpen }">
+          <template #header>
+            <el-switch v-model="logOpen" size="small" class="log-switch" @click.stop />
+            <b class="log-title" @click="logOpen = !logOpen">命令流</b>
+            <span class="log-count">{{ cmdLog.length }}</span>
+            <span v-if="!logOpen && latestLog" class="log-latest" @click="logOpen = true">
+              {{ cmdKind(latestLog.text).icon }} {{ latestLog.text }}
+            </span>
+          </template>
+          <div v-show="logOpen" class="cmd-stream">
             <div v-for="(l, i) in cmdTimeline" :key="l.ts + '-' + i" class="log-line" :class="[cmdKind(l.text).cls, { 'round-start': l.round }]">
               <span class="log-ts">{{ fmtTs(l.ts) }}</span>
               <span class="log-ic" :title="cmdKind(l.text).label">{{ cmdKind(l.text).icon }}</span>
@@ -649,6 +656,13 @@ onBeforeUnmount(() => { if (clockTimer) clearInterval(clockTimer) })
 
 const recentLogs = computed(() => cmdLog.value.slice(-14).reverse())
 
+// 命令流卡片收纳：默认展开；新任务开始时自动展开（过程可追溯），空闲可收起只留最新一条
+const logOpen = ref(true)
+const latestLog = computed(() => cmdLog.value[cmdLog.value.length - 1] ?? null)
+watch(phase, v => {
+  if (v === 'patrol') logOpen.value = true   // 新一轮任务开始 → 自动展开
+})
+
 // 时间线视图：倒序展示时标记「组首」（正序视角中的新一轮任务），配合缩进形成视觉归组
 // round=false → 组首（新一轮任务开头，正序视角），round=true → 同轮内
 const cmdTimeline = computed(() => {
@@ -990,6 +1004,17 @@ html, body, #app { height: 100%; }
 .cs-sep { color: #dcdfe6; }
 .log-count { margin-left: 8px; color: #909399; font-size: 12px; }
 .cmd-stream { flex: none; font-size: 12px; }
+/* 命令流收纳（折叠）：卡片压到单行高度，最新指令以摘要形式显示在标题行 */
+.log-card.collapsed { --el-card-padding: 0; }
+.log-card.collapsed :deep(.el-card__body) { display: none; }
+.log-card :deep(.el-card__header) { display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+.log-card .log-switch { margin-right: 2px; }
+.log-card .log-title { cursor: pointer; user-select: none; }
+.log-latest {
+  flex: 1; min-width: 0; margin-left: 2px; font-size: 12px; font-weight: normal; color: #909399;
+  cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.log-latest:hover { color: #606266; }
 .log-line { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px dashed #f0f0f0; animation: fade-in .3s; }
 .log-line.round-start { margin-top: 5px; border-top: 1px solid #ebeef5; padding-top: 6px; }
 .log-line:not(.round-start) { padding-left: 10px; border-left: 2px solid #f4f6f9; margin-left: 6px; }
