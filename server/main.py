@@ -57,7 +57,9 @@ SYSTEM_PROMPT = """你是园区/仓储智能巡检系统的视觉识别模块。
 - litter 垃圾分类违规（垃圾桶旁散落杂物、垃圾未入桶）
 - goods 货物堆放违规（货物越线、占道堆放）
 - blocked 通道占用（安全出口/疏散通道被堵）
+- waterlogging 积水内涝（路面积水成片、下凹处积水、井盖顶起或旋涡）
 注意：摆放在路侧/路边的交通锥、施工围挡属于园区正常设施，不构成异常；仅当安全出口、疏散通道或消防通道被实际堵塞时才判 blocked。
+雨天注意：湿地面反光、水渍、倒影常被误判为垃圾或油污，只有确认存在实体杂物时才判 litter；积水要区分正常雨水湿滑与成片积水（能形成镜面反光、边界清晰、淹及路面标线才算 waterlogging）。
 描述 evidence 时只描述画面中的场景实体（地面、草坪、道路、垃圾、烟头等），忽略画面角落的水印、OSD、时间戳等文字标记，不要在描述中出现"模拟/mock/SIM"等字样。
 
 严格只输出 JSON，不要任何其他文字。格式：
@@ -70,6 +72,7 @@ TYPE_ALIASES = {
     "litter": ["垃圾", "垃圾分类", "杂物", "散落"],
     "goods": ["货物", "堆放", "越线", "占道"],
     "blocked": ["通道", "占用", "堵塞", "安全出口", "疏散"],
+    "waterlogging": ["积水", "内涝", "水浸", "涝", "漫水"],
 }
 
 
@@ -322,6 +325,7 @@ AGENT_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡"
 3. 查询类问题（"有什么异常/情况怎么样"）直接依据状态信息回答，actions 为空数组
 4. 处置方法、规范、平台用法类问题，优先依据知识库参考资料回答，保持简短；与参考资料无关的平台状态问题仍依据状态信息
 5. 不确定意图时友好追问，不做猜测动作
+6. 雨天约束：作业环境为大雨时不要输出 recheck 动作（无人机无法起飞），改为建议人工确认；植被缺水类异常建议雨停后再处置；被问"雨天怎么巡检/器械还要不要"时，依据知识库与约束如实说明降级项（无人机停飞、车只跑关键点、固定摄像头与人工补位）
 
 知识库参考资料（来自本地巡检知识库检索，与问题相关时可引用）：
 {knowledge_block}"""
@@ -344,6 +348,15 @@ def _build_context_block(ctx: dict) -> str:
     lines.append(f"任务阶段：{phase_names.get(ctx.get('phase'), ctx.get('phase', '—'))}")
     mode_label = {"quick": "快速巡逻", "point": "定点详查", "sweep": "环视检查"}.get(ctx.get("patrolMode"), "快速巡逻")
     lines.append(f"当前巡查方式：{mode_label}")
+    weather_names = {"clear": "晴", "rain": "小雨", "storm": "大雨"}
+    weather = ctx.get("weather") or "clear"
+    lines.append(f"作业环境：{weather_names.get(weather, weather)}")
+    if weather == "storm":
+        lines.append("雨天约束（大雨）：无人机无法起飞，禁止 recheck 动作；植被缺水类异常暂缓派单，"
+                     "优先处置通道占用、积水内涝；判读置信度整体下调，建议人工或固定摄像头确认")
+    elif weather == "rain":
+        lines.append("雨天约束（小雨）：地面反光与低照度会影响判读，植被缺水类异常暂缓派单，"
+                     "其余异常建议提高复核比例后再处置")
     anomalies = ctx.get("anomalies") or []
     if anomalies:
         parts = []
@@ -394,6 +407,16 @@ def _last_user_text(messages: list[dict]) -> str:
     return ""
 
 
+def _storm_recheck_guard(text: str, ctx: dict):
+    """大雨约束短路：用户要求无人机复核时，直接给出降级说明（不调模型、不下发动作）"""
+    if (ctx.get("weather") or "clear") != "storm":
+        return None
+    if not any(k in (text or "") for k in ("复核", "复查")):
+        return None
+    return ("雨这么大无人机没法起飞，复核先停：建议改人工到现场确认，或者等雨停了我再飞一轮。"
+            "已经确认的异常可以先标记处置，没把握的先挂起。")
+
+
 @app.post("/api/agent/chat")
 async def agent_chat(data: dict):
     if not (CFG.get("api_key") and CFG.get("base_url")):
@@ -407,6 +430,9 @@ async def agent_chat(data: dict):
 
     ctx = data.get("context") or {}
     kb_block, kb_sources = _rag_block(_last_user_text(messages))
+    guard = _storm_recheck_guard(_last_user_text(messages), ctx)
+    if guard:
+        return {"reply": guard, "actions": [], "sources": kb_sources}
     payload = {
         "model": CFG.get("model", "agnes-3.0-flash"),
         "messages": [
@@ -482,6 +508,7 @@ ACTIONS: []
 2. 查询类问题直接依据状态信息回答，ACTIONS: []
 3. 处置方法、规范、平台用法类问题，优先依据知识库参考资料回答，保持简短；与参考资料无关的平台状态问题仍依据状态信息
 4. 不确定意图时友好追问，不做猜测动作
+5. 雨天约束：作业环境为大雨时不要输出 recheck 动作（无人机无法起飞），改为建议人工确认；植被缺水类异常建议雨停后再处置；被问"雨天怎么巡检/器械还要不要"时，依据知识库与约束如实说明降级项
 
 知识库参考资料（来自本地巡检知识库检索，与问题相关时可引用）：
 {knowledge_block}"""
@@ -514,7 +541,9 @@ def _local_fallback_actions(text: str, ctx: dict) -> list[dict]:
     if any(k in t for k in ("处理完", "已处理", "标记", "解决")):
         actions.append({"type": "mark_resolved", "args": {"all": True}})
     if any(k in t for k in ("复核", "复查")):
-        actions.append({"type": "recheck", "args": {"all": True}})
+        # 雨天约束：大雨时无人机无法起飞，规则引擎同样不下发复核动作（与提示词约束一致）
+        if (ctx.get("weather") or "clear") != "storm":
+            actions.append({"type": "recheck", "args": {"all": True}})
     for kw, target in (("仓库", "warehouse"), ("园区", "park")):
         if kw in t and ctx.get("sceneId") != target:
             actions.append({"type": "switch_scene", "args": {"sceneId": target}})
@@ -573,6 +602,14 @@ async def agent_chat_stream(data: dict):
         action_names = {"patrol": "发起巡检", "switch_mode": "切换数据源", "switch_scene": "切换场景",
                         "export_report": "导出报告", "mark_resolved": "标记处置", "recheck": "无人机复核",
                         "workorder": "工单流转"}
+        guard = _storm_recheck_guard(user_text, ctx)
+        if guard:
+            # 大雨复核短路：先给计划阶段帧（标注约束），再流式口播降级说明，动作数组为空
+            yield _sse({"stage": "act", "text": "雨天约束：无人机复核已暂停，转人工确认"})
+            yield _sse({"delta": guard})
+            yield _sse({"actions": [], "sources": kb_sources, "done": True, "reply": guard})
+            yield "data: [DONE]\n\n"
+            return
         if planned:
             yield _sse({"stage": "act",
                         "text": "解析指令 → 计划执行：" + "、".join(action_names.get(a["type"], a["type"]) for a in planned)})

@@ -124,10 +124,13 @@ def build_report_pdf(data: dict) -> bytes:
         ["巡检范围", _esc(data.get("scope", "—"))],
         ["巡查方式", _esc(data.get("mode", "—"))],
         ["数据来源", _esc(data.get("source", "—"))],
+        ["作业环境", _esc(data.get("weather", "晴"))],
         ["发现异常", f"{len(findings_all)} 处（其中 {len(confirmed)} 处已复核确认）"],
         ["处置进度", f"已处置 {n_resolved} 处 · 处理中 {n_processing} 处 · 待处理 {len(findings_all) - n_resolved - n_processing} 处"],
         ["生成时间", now],
     ]
+    if data.get("weatherNote"):
+        meta_rows.insert(3, ["环境降级", _esc(data.get("weatherNote"))])
     meta_tbl = Table([[Paragraph(f"<b>{k}</b>", S["meta"]), Paragraph(v, S["meta"])] for k, v in meta_rows],
                      colWidths=[28 * mm, 140 * mm])
     meta_tbl.setStyle(TableStyle([

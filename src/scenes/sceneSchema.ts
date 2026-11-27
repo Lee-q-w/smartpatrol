@@ -118,6 +118,7 @@ export const ANOMALY_TYPE_META: Record<string, AnomalyTypeMeta> = {
   litter: { label: '垃圾分类违规', color: '#8e44ad', icon: '🗑' },
   blocked: { label: '通道占用', color: '#e74c3c', icon: '🚧' },
   goods: { label: '货物堆放违规', color: '#f39c12', icon: '📦' },
+  waterlogging: { label: '积水内涝', color: '#2980b9', icon: '🌊' },
 }
 
 // ---------- 默认设备类型（场景可用 deviceKinds 自定义） ----------

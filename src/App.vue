@@ -144,6 +144,13 @@
                 <el-radio-button v-for="(m, k) in PATROL_MODES" :key="k" :value="k">{{ m.label }}</el-radio-button>
               </el-radio-group>
             </div>
+            <div class="zone-row" style="margin-top: 10px">
+              <span class="zone-label">作业环境</span>
+              <el-radio-group v-model="weather" size="small">
+                <el-radio-button v-for="(w, k) in WEATHER_MODES" :key="k" :value="k">{{ w.icon }} {{ w.label }}</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div v-if="weather !== 'clear'" class="weather-tip">{{ weatherHint }}</div>
             <div class="ctrl-btn-row">
               <el-button :type="startBtn.type" size="large" style="flex: 1.6"
                 :disabled="startBtn.disabled" @click="startPatrol">
@@ -284,6 +291,14 @@ const droneTarget = ref(null)
 const view = ref('home')   // 主导航：首页 / 实时巡检 / 地图工作台 / AI 识别中心 / 值守大屏（开屏后落首页）
 const zoneIds = ref(['zone-c'])   // 巡逻范围：可多选/全园，保持点选顺序
 const patrolMode = ref('quick')  // 巡查方式：quick / point / sweep
+// 作业环境（雨天自适应：影响助手策略、无人机复核与报告标注）
+const weather = ref('clear')
+const WEATHER_MODES = {
+  clear: { label: '晴', icon: '☀', hint: '' },
+  rain: { label: '小雨', icon: '🌦', hint: '小雨：地面反光影响判读，植被类异常暂缓派单，复核比例建议提高' },
+  storm: { label: '大雨', icon: '🌧', hint: '大雨：无人机复核暂停，植被类点位跳过，优先通道占用与积水内涝' },
+}
+const weatherHint = computed(() => WEATHER_MODES[weather.value]?.hint ?? '')
 const eviDialogRef = ref(null)
 const activeAnomaly = ref(null)
 
@@ -340,6 +355,7 @@ const assistantContext = computed(() => ({
   scenes: sceneList.value.map(s => ({ id: s.id, name: s.name })),
   zones: zoneList.value,
   mode: dsMode.value, phase: phase.value, patrolMode: patrolMode.value,
+  weather: weather.value, weatherLabel: WEATHER_MODES[weather.value].label,
   anomalies: anomalies.value.map(a => ({
     label: a.label, near: a.near, stage: a.stage,
     handleStatus: a.handle?.status ?? 'pending', confidence: a.confidence,
@@ -388,7 +404,8 @@ useMcpBridge({
   // 平台快照（与内置助手上下文同源，额外补 id/坐标/证据等 MCP 查询所需字段）
   source: () => ({
     scene: { id: currentScene.value.id, name: currentScene.value.name },
-    mode: dsMode.value, phase: phase.value, patrolMode: patrolMode.value,
+  mode: dsMode.value, phase: phase.value, patrolMode: patrolMode.value,
+  weather: weather.value, weatherLabel: WEATHER_MODES[weather.value].label,
     battery: Math.round(devices.agv.battery),
     position: { x: +devices.agv.x.toFixed(1), y: +devices.agv.y.toFixed(1) },
     agvStatus: devices.agv.status,
@@ -401,7 +418,7 @@ useMcpBridge({
     })),
     stats: handleStats.value, reportGenerated: !!report.value,
   }),
-  watchTargets: [dsMode, phase, patrolMode, anomalies, devices, report],
+  watchTargets: [dsMode, phase, patrolMode, weather, anomalies, devices, report],
   actionExecutor: onAssistantAction,   // 与 AI 助手同一套动作链（含 workorder）
 })
 const ticketLabel = a => ({ pending: '未处理', processing: '处理中', resolved: '已处理' }[a.handle?.status ?? 'pending'] ?? '未处理')
@@ -457,6 +474,7 @@ const startBtn = computed(() => {
 // 重点复查按钮：按 忙 / 无异常 / 已全复核 / 有待复核 四态给文案（真机模式无无人机复核）
 const recheckBtn = computed(() => {
   if (isReal.value) return { disabled: true, text: '🚁 真机模式由 AI 直接确认，无需复核' }
+  if (weather.value === 'storm') return { disabled: true, text: '🌧 大雨暂停无人机复核，转人工确认' }
   if (recheckBusy.value) return { disabled: true, text: '⏳ 无人机复核中…' }
   if (!anomalies.value.length) return { disabled: true, text: '🚁 重点复查（发现异常后可点）' }
   if (!pendingRecheck.value.length) return { disabled: true, text: '✅ 异常已全部复核' }
@@ -564,10 +582,23 @@ function onQuickPatrol() {
 function startPatrol() {
   // 真机模式任务进行中：按钮变急停（安全优先，真机必须可随时停）
   if (isReal.value && !missionIdle.value) { dispatch('stop', {}); return }
+  if (!missionIdle.value) return
   dispatch('patrol', { zoneIds: zoneIds.value, mode: patrolMode.value })
+  // 雨天作业：把降级策略写进命令流，让过程可追溯（也便于报告与答辩说明）
+  if (weather.value === 'storm') {
+    cmdLog.value.push({ ts: Date.now(), text: '🌧 大雨模式：无人机复核暂停，植被类点位跳过，优先通道占用与积水内涝' })
+  } else if (weather.value === 'rain') {
+    cmdLog.value.push({ ts: Date.now(), text: '🌦 小雨模式：地面反光影响判读，植被类暂缓派单，建议提高复核比例' })
+  }
 }
 
-function recheckAll() { dispatch('recheck', { all: true }) }
+function recheckAll() {
+  if (weather.value === 'storm') {
+    ElMessage.warning('大雨天气无人机无法起飞，请改人工确认或等雨停再复核')
+    return
+  }
+  dispatch('recheck', { all: true })
+}
 
 function openEvidence(a) {
   // 弹窗需要照片与帧说明：异常自带元数据优先（真机帧 / AI 注入），无照片时弹窗显示占位
@@ -647,6 +678,8 @@ async function exportReport() {
       scope: isReplay.value ? '西南分区（真实回放）' : scopeText.value,
       mode: isReplay.value ? '回放模式' : PATROL_MODES[patrolMode.value].label,
       source: modeName.value,
+      weather: WEATHER_MODES[weather.value].label,
+      weatherNote: weather.value === 'clear' ? '' : WEATHER_MODES[weather.value].hint,
       findings,
     }
     const r = await fetch(`${API}/api/report/export`, {
@@ -714,6 +747,10 @@ html, body, #app { height: 100%; }
 .status-line { display: flex; justify-content: space-between; margin-top: 10px; color: #909399; font-size: 13px; }
 .battery { color: #67c23a; font-weight: 600; }
 .mode-tip { margin-top: 8px; font-size: 12px; color: #909399; }
+.weather-tip {
+  margin-top: 8px; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5;
+  color: #b26a00; background: #fdf6ec; border: 1px solid #f5dab1;
+}
 /* 控制卡精简（评委反馈）：开始/复检并排，次要信息折叠收纳，状态合并一行 */
 .ctrl-btn-row { display: flex; gap: 8px; margin-top: 10px; }
 .ctrl-btn-row .el-button { margin: 0; flex: 1; white-space: normal; height: auto; min-height: 40px; padding-top: 7px; padding-bottom: 7px; }
