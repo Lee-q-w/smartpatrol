@@ -14,7 +14,7 @@ from pathlib import Path
 
 _KB_DIR = Path(__file__).parent / "knowledge"
 _K1, _B = 1.5, 0.75          # BM25 经典参数
-_MIN_SCORE = 1.5             # 低于此分视为不相关，不注入（检索不误触）
+_MIN_SCORE = 2.5             # 低于此分视为不相关，不注入（知识库扩容后按实测校准，压住弱相关噪声）
 _MAX_CHUNK_CHARS = 500       # 单块正文上限
 _SNIPPET_CHARS = 400         # 注入 prompt 时的单块截断长度
 
