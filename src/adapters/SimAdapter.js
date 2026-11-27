@@ -227,7 +227,18 @@ export class SimAdapter {
         this._emit(EventType.COMMAND_LOG, {
           text: `${fleet === 2 ? car.name + '：' : ''}收到${modeName}任务，规划${myScope}路线（共 ${m.route.length - 1} 个检查点）`,
         })
-        this._runQuick(token, car, m)
+        // 先驶向自己路线的起点，再开始沿线推进（避免从停靠点瞬移到起点）
+        const p0 = m.route?.[0]
+        const dist = p0 ? Math.hypot(p0[0] - car.pose.x, p0[1] - car.pose.y) : 0
+        if (dist > 1.5) {
+          car.status = 'moving'
+          this._emit(EventType.STATUS, { entityId: car.id, status: 'moving' })
+          this._flyTo(car, { x: p0[0], y: p0[1] }).then(() => {
+            if (token === this._missionToken && this.running) this._runQuick(token, car, m)
+          })
+        } else {
+          this._runQuick(token, car, m)
+        }
       } else {
         this._emit(EventType.COMMAND_LOG, {
           text: `${fleet === 2 ? car.name + '：' : ''}收到${modeName}任务，将停靠 ${m.points.length} 个检查点：${myScope}`,
