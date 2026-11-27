@@ -316,7 +316,7 @@ AGENT_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡"
 {context_block}
 
 可执行动作（actions 数组，按需 0 个或多个）：
-- {{"type":"patrol","args":{{"zoneIds":["zone-c"],"mode":"point"}}}}  发起巡逻。zoneIds 省略=全部分区；mode：quick 快速巡逻/point 定点详查/sweep 环视检查，省略=保持当前方式
+- {{"type":"patrol","args":{{"zoneIds":["zone-c"],"mode":"point","fleet":2}}}}  发起巡逻。zoneIds 省略=全部分区；mode：quick 快速巡逻/point 定点详查/sweep 环视检查，省略=保持当前方式；fleet=2 表示双车协同（分区对半分、两台车并行），省略=单车
 - {{"type":"switch_mode","args":{{"mode":"real"}}}}  切换数据源。sim 仿真/replay 历史回放/real 真机
 - {{"type":"switch_scene","args":{{"sceneId":"warehouse"}}}}  切换巡检场景
 - {{"type":"export_report","args":{{}}}}  导出 PDF 巡检报告
@@ -329,7 +329,8 @@ AGENT_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡"
 3. 查询类问题（"有什么异常/情况怎么样"）直接依据状态信息回答，actions 为空数组
 4. 处置方法、规范、平台用法类问题，优先依据知识库参考资料回答，保持简短；与参考资料无关的平台状态问题仍依据状态信息
 5. 不确定意图时友好追问，不做猜测动作
-6. 雨天口径：雨天不是"同一批异常看不清"，而是判定项变了——大雨应判积水内涝（含绿地积水）、通道占用、垃圾堵塞排水口，不判植被缺水（雨天不存在）、不判未熄烟头（已浇灭）；小雨的烟头只查雨棚连廊门厅等遮蔽处；大雨不要输出 recheck 动作（无人机无法起飞），改为建议人工确认。被问"雨天怎么巡检/器械还要不要"时，依据知识库与约束如实说明（无人机停飞、车只跑关键点、固定摄像头与人工补位）
+6. 车队协同：平台支持双车协同（fleet=2，两台车按分区对半分并行巡逻）。用户说"两台车/双车/分头/并行"时，patrol 动作带 "fleet":2 并在回复里说明分工；只有 1 个分区时按单车执行
+7. 雨天口径：雨天不是"同一批异常看不清"，而是判定项变了——大雨应判积水内涝（含绿地积水）、通道占用、垃圾堵塞排水口，不判植被缺水（雨天不存在）、不判未熄烟头（已浇灭）；小雨的烟头只查雨棚连廊门厅等遮蔽处；大雨不要输出 recheck 动作（无人机无法起飞），改为建议人工确认。被问"雨天怎么巡检/器械还要不要"时，依据知识库与约束如实说明（无人机停飞、车只跑关键点、固定摄像头与人工补位）
 
 知识库参考资料（来自本地巡检知识库检索，与问题相关时可引用）：
 {knowledge_block}"""
@@ -491,7 +492,7 @@ STREAM_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡
 {context_block}
 
 可执行动作（按需 0 个或多个，JSON 对象）：
-- {{"type":"patrol","args":{{"zoneIds":["zone-c"],"mode":"point"}}}}  发起巡逻。zoneIds 省略=全部分区；mode：quick 快速巡逻/point 定点详查/sweep 环视检查，省略=保持当前方式
+- {{"type":"patrol","args":{{"zoneIds":["zone-c"],"mode":"point","fleet":2}}}}  发起巡逻。zoneIds 省略=全部分区；mode：quick 快速巡逻/point 定点详查/sweep 环视检查；fleet=2 表示双车协同（分区对半并行），省略=单车
 - {{"type":"switch_mode","args":{{"mode":"real"}}}}  切换数据源。sim 仿真/replay 历史回放/real 真机
 - {{"type":"switch_scene","args":{{"sceneId":"warehouse"}}}}  切换巡检场景
 - {{"type":"export_report","args":{{}}}}  导出 PDF 巡检报告
@@ -514,7 +515,8 @@ ACTIONS: []
 2. 查询类问题直接依据状态信息回答，ACTIONS: []
 3. 处置方法、规范、平台用法类问题，优先依据知识库参考资料回答，保持简短；与参考资料无关的平台状态问题仍依据状态信息
 4. 不确定意图时友好追问，不做猜测动作
-5. 雨天口径：大雨应判积水内涝（含绿地积水）、通道占用、垃圾堵塞排水口，不判植被缺水、不判未熄火烟头（已浇灭）；小雨的烟头只查雨棚连廊门厅等遮蔽处；大雨不要输出 recheck 动作，改为建议人工确认；被问"雨天怎么巡检/器械还要不要"时，依据知识库与约束如实说明
+5. 车队协同：用户说"两台车/双车/分头/并行"时，patrol 动作带 "fleet":2 并说明分工；只有 1 个分区按单车执行
+6. 雨天口径：大雨应判积水内涝（含绿地积水）、通道占用、垃圾堵塞排水口，不判植被缺水、不判未熄火烟头（已浇灭）；小雨的烟头只查雨棚连廊门厅等遮蔽处；大雨不要输出 recheck 动作，改为建议人工确认；被问"雨天怎么巡检/器械还要不要"时，依据知识库与约束如实说明
 
 知识库参考资料（来自本地巡检知识库检索，与问题相关时可引用）：
 {knowledge_block}"""
@@ -534,13 +536,15 @@ def _local_fallback_actions(text: str, ctx: dict) -> list[dict]:
         return actions
     zones = [z for z in (ctx.get("zones") or []) if isinstance(z, dict)]
     # 巡逻
-    if any(k in t for k in ("巡逻", "巡检", "巡查", "检查", "体检", "详查", "查一查", "看一遍", "看下")):
+    if any(k in t for k in ("巡逻", "巡检", "巡查", "检查", "体检", "详查", "查一查", "看一遍", "看下", "分头", "查全园")):
         mode = "point" if ("详查" in t or "定点" in t) else ("sweep" if "环视" in t else "quick")
+        # 双车协同意图：「两台车 / 双车 / 协同 / 分头 / 并行」→ fleet=2（分区对半分）
+        dual = any(k in t for k in ("两台车", "双车", "协同", "分头", "并行", "两台"))
         zone_hit = next((z for z in zones if z.get("name") and z["name"].replace("分区", "") and z["name"].replace("分区", "") in t), None)
-        if zone_hit:
-            actions.append({"type": "patrol", "args": {"zoneIds": [zone_hit["id"]], "mode": mode}})
-        else:
-            actions.append({"type": "patrol", "args": {"mode": mode}})
+        args = {"zoneIds": [zone_hit["id"]], "mode": mode} if zone_hit else {"mode": mode}
+        if dual:
+            args["fleet"] = 2
+        actions.append({"type": "patrol", "args": args})
     # 报告 / 处置 / 复核 / 场景 / 数据源
     if any(k in t for k in ("报告", "导出", "PDF", "pdf")):
         actions.append({"type": "export_report", "args": {}})

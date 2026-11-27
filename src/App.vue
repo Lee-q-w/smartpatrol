@@ -76,7 +76,7 @@
       </header>
       <div class="screen-map">
         <ParkMap
-          :scene="currentScene" :night="true" :agv="devices.agv" :drone="devices.drone"
+          :scene="currentScene" :night="true" :agv="devices.agv" :agv2="devices.agv2" :drone="devices.drone"
           :route-progress="routeShown" :route="plannedRoute" :anomalies="anomalies"
           :show-anomalies="anomalies.length > 0" :drone-target="droneTarget"
           :base-width="1400" @anomaly-click="openEvidence" />
@@ -111,6 +111,7 @@
           :scene="currentScene"
           :night="theme === 'dark'"
           :agv="devices.agv"
+          :agv2="devices.agv2"
           :drone="devices.drone"
           :route-progress="routeShown"
           :route="plannedRoute"
@@ -167,6 +168,13 @@
               </el-radio-group>
             </div>
             <div class="zone-row" style="margin-top: 10px">
+              <span class="zone-label">车队编组</span>
+              <div class="fleet-row">
+                <el-switch v-model="fleetMode" size="small" active-text="双车协同" :disabled="!missionIdle || isReal || isReplay" />
+                <span class="fleet-hint">{{ fleetMode ? '两台车按分区并行，任务自动对半分' : '单台车执行全部任务' }}</span>
+              </div>
+            </div>
+            <div class="zone-row" style="margin-top: 10px">
               <span class="zone-label">作业环境</span>
               <el-radio-group v-model="weather" size="small">
                 <el-radio-button v-for="(w, k) in WEATHER_MODES" :key="k" :value="k">{{ w.icon }} {{ w.label }}</el-radio-button>
@@ -212,7 +220,9 @@
             <b>{{ phaseLabel }}</b>
             <template v-if="!isReplay"><span class="cs-sep">·</span><span>{{ scopeText }}</span></template>
             <span class="cs-sep">·</span>
-            <span class="battery">电量 {{ devices.agv.battery }}%</span>
+            <span class="battery">
+              电量 {{ devices.agv.battery }}%<template v-if="devices.agv2.enabled"> · 2号 {{ devices.agv2.battery }}%</template>
+            </span>
             <span class="cs-sep">·</span>
             <span>{{ isReplay ? '回放倍速' : '速度' }} {{ speed }}x</span>
           </div>
@@ -328,6 +338,8 @@ const droneTarget = ref(null)
 const view = ref('home')   // 主导航：首页 / 实时巡检 / 地图工作台 / AI 识别中心 / 值守大屏（开屏后落首页）
 const zoneIds = ref(['zone-c'])   // 巡逻范围：可多选/全园，保持点选顺序
 const patrolMode = ref('quick')  // 巡查方式：quick / point / sweep
+// 车队编组：双车协同（分区对半分，两台车并行巡逻）
+const fleetMode = ref(false)
 // 作业环境（雨天自适应：影响助手策略、无人机复核与报告标注）
 const weather = ref('clear')
 const WEATHER_MODES = {
@@ -402,6 +414,7 @@ const assistantContext = computed(() => ({
   zones: zoneList.value,
   mode: dsMode.value, phase: phase.value, patrolMode: patrolMode.value,
   weather: weather.value, weatherLabel: WEATHER_MODES[weather.value].label,
+  fleet: { enabled: fleetMode.value, cars: devices.agv2.enabled ? 2 : 1, battery2: Math.round(devices.agv2.battery) },
   anomalies: anomalies.value.map(a => ({
     label: a.label, near: a.near, stage: a.stage,
     handleStatus: a.handle?.status ?? 'pending', confidence: a.confidence,
@@ -415,7 +428,13 @@ async function onAssistantAction(a) {
     if (type === 'patrol') {
       if (!missionIdle.value) { ElMessage.warning('当前任务进行中，稍候再试'); return }
       if (args.zoneIds?.length) zoneIds.value = [...args.zoneIds]
+      else zoneIds.value = zoneList.value.map(z => z.id)   // 助手未指定分区 = 全部分区（与提示词语义一致）
       if (args.mode && PATROL_MODES[args.mode]) patrolMode.value = args.mode
+      // 助手明确要求双车协同时，自动打开编组开关（分区不足时补齐为全园）
+      if (args.fleet === 2) {
+        fleetMode.value = true
+        if (zoneIds.value.length < 2) zoneIds.value = zoneList.value.map(z => z.id)
+      }
       startPatrol()
     } else if (type === 'switch_mode') {
       if (args.mode && ['sim', 'replay', 'real'].includes(args.mode) && args.mode !== dsMode.value) {
@@ -453,6 +472,8 @@ useMcpBridge({
   mode: dsMode.value, phase: phase.value, patrolMode: patrolMode.value,
   weather: weather.value, weatherLabel: WEATHER_MODES[weather.value].label,
     battery: Math.round(devices.agv.battery),
+    fleet: { enabled: !!devices.agv2.enabled, battery2: Math.round(devices.agv2.battery),
+             pos2: { x: +devices.agv2.x.toFixed(1), y: +devices.agv2.y.toFixed(1) } },
     position: { x: +devices.agv.x.toFixed(1), y: +devices.agv.y.toFixed(1) },
     agvStatus: devices.agv.status,
     zones: zoneList.value,
@@ -464,7 +485,7 @@ useMcpBridge({
     })),
     stats: handleStats.value, reportGenerated: !!report.value,
   }),
-  watchTargets: [dsMode, phase, patrolMode, weather, anomalies, devices, report],
+  watchTargets: [dsMode, phase, patrolMode, weather, fleetMode, anomalies, devices, report],
   actionExecutor: onAssistantAction,   // 与 AI 助手同一套动作链（含 workorder）
 })
 const ticketLabel = a => ({ pending: '未处理', processing: '处理中', resolved: '已处理' }[a.handle?.status ?? 'pending'] ?? '未处理')
@@ -680,7 +701,10 @@ function startPatrol() {
   // 真机模式任务进行中：按钮变急停（安全优先，真机必须可随时停）
   if (isReal.value && !missionIdle.value) { dispatch('stop', {}); return }
   if (!missionIdle.value) return
-  dispatch('patrol', { zoneIds: zoneIds.value, mode: patrolMode.value })
+  dispatch('patrol', {
+    zoneIds: zoneIds.value, mode: patrolMode.value,
+    fleet: fleetMode.value && !isReplay.value && !isReal.value ? 2 : 1,
+  })
   // 雨天作业：把降级策略写进命令流，让过程可追溯（也便于报告与答辩说明）
   if (weather.value === 'storm') {
     cmdLog.value.push({ ts: Date.now(), text: '🌧 大雨模式：不判缺水与烟头，重点看积水内涝/通道占用/排水口堵塞，无人机复核暂停' })
@@ -845,6 +869,8 @@ html, body, #app { height: 100%; }
 .status-line { display: flex; justify-content: space-between; margin-top: 10px; color: #909399; font-size: 13px; }
 .battery { color: #67c23a; font-weight: 600; }
 .mode-tip { margin-top: 8px; font-size: 12px; color: #909399; }
+.fleet-row { display: flex; align-items: center; gap: 10px; flex: 1; }
+.fleet-row .fleet-hint { font-size: 11.5px; color: #909399; line-height: 1.4; }
 .weather-tip {
   margin-top: 8px; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5;
   color: #b26a00; background: #fdf6ec; border: 1px solid #f5dab1;

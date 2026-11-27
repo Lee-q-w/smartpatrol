@@ -26,6 +26,8 @@ export function useDataSource() {
   // 遥测状态（响应式镜像）
   const devices = reactive({
     agv: { x: 30, y: 20, yaw: 0, battery: 96, status: 'idle', zone: '' },
+    // 二号车：双车协同任务时启用（enabled=false 时地图不渲染）
+    agv2: { x: 27, y: 20, yaw: 0, battery: 96, status: 'idle', zone: '', enabled: false },
     drone: { x: 30, y: 20, yaw: 0, active: false, battery: 100 },
   })
   const anomalies = ref([])
@@ -46,13 +48,22 @@ export function useDataSource() {
       case 'pose': {
         if (payload.entityId === 'patrol-agv-01') {
           devices.agv.x = payload.pose.x; devices.agv.y = payload.pose.y; devices.agv.yaw = payload.pose.yaw
+        } else if (payload.entityId === 'patrol-agv-02') {
+          devices.agv2.x = payload.pose.x; devices.agv2.y = payload.pose.y; devices.agv2.yaw = payload.pose.yaw
         } else if (payload.entityId === 'drone-01') {
           devices.drone.x = payload.pose.x; devices.drone.y = payload.pose.y
         }
         break
       }
-      case 'battery': devices.agv.battery = payload.value; break
-      case 'status': devices.agv.status = payload.status; break
+      case 'battery':
+        if (payload.entityId === 'patrol-agv-02') devices.agv2.battery = payload.value
+        else devices.agv.battery = payload.value
+        break
+      case 'status':
+        if (payload.entityId === 'patrol-agv-02') devices.agv2.status = payload.status
+        else devices.agv.status = payload.status
+        break
+      case 'fleet': devices.agv2.enabled = !!payload.active; break
       case 'anomaly': {
         // 快照克隆：适配器持有原始对象并就地修改，若直接存同一引用，
         // 后续 emit 替换同位置不触发响应式（computed 缓存不失效）——克隆切断共享
@@ -98,6 +109,7 @@ export function useDataSource() {
     realInfo.value = { state: 'offline', text: '设备未连接', device: null }
     const dk = sceneRef.value?.dock ?? { x: 30, y: 20 }
     devices.agv = { x: dk.x, y: dk.y, yaw: 0, battery: 96, status: 'idle', zone: '' }
+    devices.agv2 = { x: dk.x - 3, y: dk.y, yaw: 0, battery: 96, status: 'idle', zone: '', enabled: false }
     devices.drone = { x: dk.x, y: dk.y, yaw: 0, active: false, battery: 100 }
     // 建新（仿真/真机吃当前场景）
     adapter.value = ADAPTERS[next](sceneRef.value)

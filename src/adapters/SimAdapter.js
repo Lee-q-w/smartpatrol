@@ -42,9 +42,15 @@ export class SimAdapter {
 
   _initEntities() {
     this.entities.set('patrol-agv-01', {
-      id: 'patrol-agv-01', type: 'agv', name: '巡逻 AGV',
+      id: 'patrol-agv-01', type: 'agv', name: '巡逻 AGV-1',
       pose: { x: this.scene.dock.x, y: this.scene.dock.y, yaw: 0 }, battery: 96,
       status: 'idle', zone: this.scene.zones[0]?.id ?? '',
+    })
+    // 二号车：双车协同任务时启用（默认在场外待命，地图不显示）
+    this.entities.set('patrol-agv-02', {
+      id: 'patrol-agv-02', type: 'agv', name: '巡逻 AGV-2',
+      pose: { x: this.scene.dock.x - 0.8, y: this.scene.dock.y, yaw: 0 }, battery: 96,
+      status: 'idle', zone: this.scene.zones[0]?.id ?? '', enabled: false,
     })
     this.entities.set('drone-01', {
       id: 'drone-01', type: 'drone', name: '复核无人机',
@@ -155,65 +161,104 @@ export class SimAdapter {
     return this.scene.zones.find(z => z.id === id)?.name ?? id
   }
 
-  // ---------- 巡逻任务（多分区 + 三种巡查方式） ----------
+  // ---------- 巡逻任务（多分区 + 三种巡查方式 + 双车协同） ----------
   async _patrol(cmd) {
     const args = cmd.args ?? {}
     const zoneIds = args.zoneIds?.length ? [...args.zoneIds] : (args.zoneId ? [args.zoneId] : [])
     const mode = ['quick', 'point', 'sweep'].includes(args.mode) ? args.mode : 'quick'
+    // 双车协同：分区 ≥2 且显式要求 2 台车时，按分区交替分配给两车，并行执行
+    const fleet = args.fleet === 2 && zoneIds.length >= 2 ? 2 : 1
 
     this._cancelMission()
     this.anomalies = []               // 多轮巡逻：清空上一轮异常（UI 侧由 phase=patrol 同步重置）
-    this.mission = buildMission(this.scene, zoneIds, mode)
     const token = this._missionToken
+    const modeName = { quick: '快速巡逻', point: '定点详查', sweep: '环视检查' }[mode]
+    const scope = zoneIds.length === this.scene.zones.length ? '全园' : zoneIds.map(z => this._zoneName(z)).join('、')
+
+    // 车队编组：一号车拿偶位分区，二号车拿奇位分区
+    const agv1 = this.entities.get('patrol-agv-01')
+    const agv2 = this.entities.get('patrol-agv-02')
+    agv2.enabled = fleet === 2
+    this._emit(EventType.DRONE_DEPLOY, { active: false })   // 占位：不改变无人机状态，仅确保 UI 重绘
+    this._emit('fleet', { active: fleet === 2 })
+
+    const groups = fleet === 2
+      ? [zoneIds.filter((_, i) => i % 2 === 0), zoneIds.filter((_, i) => i % 2 === 1)]
+      : [zoneIds]
+    this.missions = groups.filter(g => g.length).map(g => buildMission(this.scene, g, mode))
 
     // 回停靠点满电出发（每轮任务从 dock 起算）
-    const agv = this.entities.get('patrol-agv-01')
-    agv.battery = 96
+    const cars = fleet === 2 ? [agv1, agv2] : [agv1]
+    for (const car of cars) {
+      car.battery = 96
+      car.status = 'idle'
+      this._emit(EventType.BATTERY, { entityId: car.id, value: 96 })
+    }
     this.batteryBase = 96
-    this._emit(EventType.BATTERY, { entityId: 'patrol-agv-01', value: 96 })
+    this._fleetTotal = cars.length
+    this._fleetDone = 0
 
-    const scope = zoneIds.length === this.scene.zones.length ? '全园' : zoneIds.map(z => this._zoneName(z)).join('、')
-    const modeName = { quick: '快速巡逻', point: '定点详查', sweep: '环视检查' }[mode]
     this._emit(EventType.PHASE, { phase: 'patrol' })
+    if (fleet === 2) {
+      const g1 = groups[0].map(z => this._zoneName(z)).join('、')
+      const g2 = groups[1].map(z => this._zoneName(z)).join('、')
+      this._emit(EventType.COMMAND_LOG, {
+        text: `🤝 双车协同：1号车负责 ${g1}，2号车负责 ${g2}，并行出发`,
+      })
+    }
 
     // 上一轮结束后若车不在停靠点（定点/环视任务终点），先开回停靠点再出发
-    if (Math.hypot(agv.pose.x - this.scene.dock.x, agv.pose.y - this.scene.dock.y) >= 1) {
-      this._emit(EventType.COMMAND_LOG, { text: '巡逻车先返回停靠点补给，再开始本轮任务' })
-      await this._flyTo(agv, { x: this.scene.dock.x, y: this.scene.dock.y })
-      if (token !== this._missionToken || !this.running) return
+    for (const car of cars) {
+      if (Math.hypot(car.pose.x - this.scene.dock.x, car.pose.y - this.scene.dock.y) >= 1) {
+        this._emit(EventType.COMMAND_LOG, { text: `${car.name}先返回停靠点补给，再开始本轮任务` })
+        await this._flyTo(car, { x: this.scene.dock.x, y: this.scene.dock.y })
+        if (token !== this._missionToken || !this.running) return
+      }
     }
 
-    if (mode === 'quick') {
-      this._emit(EventType.COMMAND_LOG, {
-        text: `收到${modeName}任务，规划${scope}路线（共 ${this.mission.route.length - 1} 个检查点）`,
-      })
-      this._runQuick(token)
-    } else {
-      this._emit(EventType.COMMAND_LOG, {
-        text: `收到${modeName}任务，将停靠 ${this.mission.points.length} 个检查点：${scope}`,
-      })
-      this._runStopAndCheck(token, mode)
-    }
+    // 每台车各自执行自己的分区任务（并行）
+    this.missions.forEach((m, i) => {
+      const car = cars[i] ?? agv1
+      // 每车播报自己的负责范围（而非整体 scope），协同分工才看得清
+      const myScope = m.zones.length === this.scene.zones.length
+        ? '全园'
+        : m.zones.map(z => this._zoneName(z)).join('、')
+      if (mode === 'quick') {
+        this._emit(EventType.COMMAND_LOG, {
+          text: `${fleet === 2 ? car.name + '：' : ''}收到${modeName}任务，规划${myScope}路线（共 ${m.route.length - 1} 个检查点）`,
+        })
+        this._runQuick(token, car, m)
+      } else {
+        this._emit(EventType.COMMAND_LOG, {
+          text: `${fleet === 2 ? car.name + '：' : ''}收到${modeName}任务，将停靠 ${m.points.length} 个检查点：${myScope}`,
+        })
+        this._runStopAndCheck(token, mode, car, m)
+      }
+    })
   }
 
   // 取消当前任务：作废执行链、停 tick、收回无人机
   _cancelMission() {
     this._missionToken++
     if (this.tickHandle) { clearInterval(this.tickHandle); this.tickHandle = null }
+    this._progressMap = new Map()
+    this._doneSet = new Set()
+    this._fleetTotal = 1
     const drone = this.entities.get('drone-01')
     drone.active = false; drone.status = 'idle'
     drone.pose = { x: this.scene.dock.x, y: this.scene.dock.y, yaw: drone.pose.yaw }
     this._emit(EventType.DRONE_DEPLOY, { active: false })
   }
 
-  // ---- quick：沿线连续巡查（弧长推进，车速恒定） ----
-  _runQuick(token) {
-    const agv = this.entities.get('patrol-agv-01')
+  // ---- quick：沿线连续巡查（弧长推进，车速恒定；支持双车并行） ----
+  _runQuick(token, agv = this.entities.get('patrol-agv-01'), m = this.missions?.[0]) {
+    if (!m) return
     agv.status = 'moving'
-    this._emit(EventType.STATUS, { entityId: 'patrol-agv-01', status: 'moving' })
+    this._emit(EventType.STATUS, { entityId: agv.id, status: 'moving' })
+    this._progressMap = this._progressMap ?? new Map()
+    this._doneSet = this._doneSet ?? new Set()
 
-    const m = this.mission
-    // 有真值异常的分区 → 在该分区的局部进度上均匀布点发现
+    // 有真值异常的分区 → 在该分区的局部进度上均匀布点发现（只看本车负责的分区）
     const byZone = anomaliesByZone(this.scene)
     const zonePlans = (m.zoneRanges ?? [])
       .map(r => ({ range: r, indices: byZone[r.zoneId] ?? [] }))
@@ -225,52 +270,76 @@ export class SimAdapter {
         fired: p.indices.map(() => false),
       }))
 
-    this.progress = 0
+    let progress = 0
+    this._progressMap.set(agv.id, 0)
 
-    this.tickHandle = setInterval(() => {
+    this.tickHandle = null
+    const handle = setInterval(() => {
       if (!this.running || token !== this._missionToken) {
-        clearInterval(this.tickHandle); this.tickHandle = null; return
+        clearInterval(handle); return
       }
       // 每 tick 前进 0.4m × 倍速（车速恒定）
-      this.progress = Math.min(1, this.progress + (0.4 * this.speed) / m.total)
-      const p = this._routePointAt(m.route, this.progress)
-      const p2 = this._routePointAt(m.route, Math.min(1, this.progress + 0.01))
+      progress = Math.min(1, progress + (0.4 * this.speed) / m.total)
+      const p = this._routePointAt(m.route, progress)
+      const p2 = this._routePointAt(m.route, Math.min(1, progress + 0.01))
       agv.pose = { x: p[0], y: p[1], yaw: Math.atan2(p2[1] - p[1], p2[0] - p[0]) * 180 / Math.PI }
       agv.zone = this._zoneOf(p[0], p[1])
-      agv.battery = Math.max(45, Math.round(this.batteryBase - this.progress * 40))
-      this._emit(EventType.POSE, { entityId: 'patrol-agv-01', pose: agv.pose })
-      this._emit(EventType.BATTERY, { entityId: 'patrol-agv-01', value: agv.battery })
-      this._emit('progress', { value: this.progress })
+      agv.battery = Math.max(45, Math.round(this.batteryBase - progress * 40))
+      this._emit(EventType.POSE, { entityId: agv.id, pose: agv.pose })
+      this._emit(EventType.BATTERY, { entityId: agv.id, value: agv.battery })
+      this._progressMap.set(agv.id, progress)
+      this._emitFleetProgress()
 
       // 异常发现：按各分区的局部进度均匀触发
       for (const plan of zonePlans) {
         if (plan.range.len <= 0) continue
-        const local = Math.max(0, Math.min(1, (this.progress * m.total - plan.range.start) / plan.range.len))
+        const local = Math.max(0, Math.min(1, (progress * m.total - plan.range.start) / plan.range.len))
         plan.thresholds.forEach((th, i) => {
           if (local >= th && !plan.fired[i]) {
             plan.fired[i] = true
-            this._discover(plan.indices[i])
+            this._discover(plan.indices[i], agv)
           }
         })
       }
 
-      if (this.progress >= 1) {
-        clearInterval(this.tickHandle); this.tickHandle = null
-        this._finishMission(token)
+      if (progress >= 1) {
+        clearInterval(handle)
+        agv.status = 'idle'
+        this._emit(EventType.STATUS, { entityId: agv.id, status: 'idle' })
+        this._carDone(agv, token)
       }
     }, 40)
+    this.tickHandle = handle
   }
 
-  // ---- point / sweep：逐点停靠检查 ----
-  async _runStopAndCheck(token, mode) {
-    const alive = () => this.running && token === this._missionToken
-    const agv = this.entities.get('patrol-agv-01')
-    agv.status = 'moving'
-    this._emit(EventType.STATUS, { entityId: 'patrol-agv-01', status: 'moving' })
+  // 车队进度：各车平均，全员到齐才算完成
+  _emitFleetProgress() {
+    const vals = [...(this._progressMap?.values() ?? [])]
+    if (!vals.length) return
+    this._emit('progress', { value: vals.reduce((a, b) => a + b, 0) / vals.length })
+  }
 
-    const m = this.mission
+  _carDone(agv, token) {
+    this._doneSet = this._doneSet ?? new Set()
+    if (this._doneSet.has(agv.id)) return
+    this._doneSet.add(agv.id)
+    this._emit(EventType.COMMAND_LOG, { text: `${agv.name}完成负责区域，返回待命` })
+    if (this._doneSet.size >= (this._fleetTotal ?? 1)) {
+      this._finishMission(token)
+    }
+  }
+
+  // ---- point / sweep：逐点停靠检查（支持双车并行） ----
+  async _runStopAndCheck(token, mode, agv = this.entities.get('patrol-agv-01'), m = this.missions?.[0]) {
+    if (!m) return
+    const alive = () => this.running && token === this._missionToken
+    agv.status = 'moving'
+    this._emit(EventType.STATUS, { entityId: agv.id, status: 'moving' })
+    this._progressMap = this._progressMap ?? new Map()
+    this._progressMap.set(agv.id, 0)
+
     let flown = 0   // 已飞距离（供进度/电量换算）
-    this._emit('progress', { value: 0 })
+    this._emitFleetProgress()
 
     for (let i = 0; i < m.points.length; i++) {
       if (!alive()) return
@@ -280,21 +349,23 @@ export class SimAdapter {
       await this._flyTo(agv, { x: pt.x, y: pt.y }, {
         onProgress: k => {
           const p = (flownBase + k * segLen) / m.total
-          this._emit('progress', { value: p })
+          this._progressMap.set(agv.id, p)
+          this._emitFleetProgress()
           agv.battery = Math.max(45, Math.round(this.batteryBase - p * 40))
-          this._emit(EventType.BATTERY, { entityId: 'patrol-agv-01', value: agv.battery })
+          this._emit(EventType.BATTERY, { entityId: agv.id, value: agv.battery })
         },
       })
       if (!alive()) return
       flown += segLen
       agv.zone = pt.zone
-      this._emit('progress', { value: Math.min(1, flown / m.total) })
+      this._progressMap.set(agv.id, Math.min(1, flown / m.total))
+      this._emitFleetProgress()
 
       // 停靠检查
       agv.status = 'working'
-      this._emit(EventType.STATUS, { entityId: 'patrol-agv-01', status: 'working' })
+      this._emit(EventType.STATUS, { entityId: agv.id, status: 'working' })
       this._emit(EventType.COMMAND_LOG, {
-        text: `🛑 停靠${pt.label}（${this._zoneName(pt.zone)}），检查：${pt.check}`,
+        text: `🛑 ${this._fleetTotal > 1 ? agv.name + ' ' : ''}停靠${pt.label}（${this._zoneName(pt.zone)}），检查：${pt.check}`,
       })
 
       if (mode === 'sweep') {
@@ -306,10 +377,12 @@ export class SimAdapter {
       }
       if (!alive()) return
       agv.status = 'moving'
-      this._emit(EventType.STATUS, { entityId: 'patrol-agv-01', status: 'moving' })
+      this._emit(EventType.STATUS, { entityId: agv.id, status: 'moving' })
     }
     if (!alive()) return
-    this._finishMission(token)
+    this._progressMap.set(agv.id, 1)
+    this._emitFleetProgress()
+    this._carDone(agv, token)
   }
 
   // 停靠点检查：命中真实异常真值则发现，否则报告正常
@@ -343,9 +416,13 @@ export class SimAdapter {
 
   // ---- 任务收尾：有未复核异常→无人机自动复核→报告；全部已复核→直接出报告；无异常→空报告 ----
   _finishMission(token) {
-    const agv = this.entities.get('patrol-agv-01')
-    agv.status = 'idle'
-    this._emit(EventType.STATUS, { entityId: 'patrol-agv-01', status: 'idle' })
+    // 全队收尾：两车都置空闲，避免协同模式下二号车仍显示"行驶中"
+    for (const id of ['patrol-agv-01', 'patrol-agv-02']) {
+      const car = this.entities.get(id)
+      if (!car) continue
+      car.status = 'idle'
+      this._emit(EventType.STATUS, { entityId: id, status: 'idle' })
+    }
     const unconfirmed = this.anomalies.filter(a => a.stage !== 'confirmed')
     if (!this.anomalies.length) {
       this._emit(EventType.COMMAND_LOG, { text: '本轮巡逻完成，未发现异常' })
@@ -476,7 +553,7 @@ export class SimAdapter {
   }
 
   // ---- 发现异常（初判）----
-  _discover(ai) {
+  _discover(ai, agv = null) {
     const a = this.scene.anomalies?.[ai]
     if (!a) return
     // 证据：优先取场景演示证据包（type 关联），否则生成仿真推演证据
@@ -493,7 +570,7 @@ export class SimAdapter {
     })
     this._emit(EventType.ANOMALY, { anomaly: this.anomalies[this.anomalies.length - 1] })
     this._emit(EventType.PHASE, { phase: 'detect' })
-    this._emit(EventType.COMMAND_LOG, { text: `📸 拍照识别：发现${f?.label ?? a.label}（初步判断，等待复核）` })
+    this._emit(EventType.COMMAND_LOG, { text: `${this._fleetTotal > 1 && agv ? agv.name + '：' : ''}📸 拍照识别：发现${f?.label ?? a.label}（初步判断，等待复核）` })
   }
 
   _confirm(a) {

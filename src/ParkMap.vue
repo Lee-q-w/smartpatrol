@@ -16,6 +16,7 @@ import { anomalyMeta, kindOf } from './scenes/sceneSchema'
 const props = defineProps({
   scene: { type: Object, required: true },        // 当前巡检场景（Scene JSON）
   agv: { type: Object, default: () => ({ x: 30, y: 20, yaw: 0 }) },
+  agv2: { type: Object, default: () => ({ enabled: false }) },
   drone: { type: Object, default: () => ({ x: 30, y: 20, active: false }) },
   routeProgress: { type: Number, default: 0 },   // 0~1 巡逻进度
   route: { type: Array, default: null },         // 当前规划路线（世界坐标折线）
@@ -327,6 +328,39 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(ax, ay)
     ctx.arc(ax, ay, 42, -yawRad - Math.PI / 5, -yawRad + Math.PI / 5)
     ctx.closePath(); ctx.fill()
+    // 车号标（双车协同时可区分 1 号 / 2 号）
+    if (props.agv2?.enabled) {
+      ctx.fillStyle = '#1f8fff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'
+      ctx.fillText('1', ax, ay - 15)
+    }
+  }
+
+  // 二号车（双车协同任务时渲染，青绿色区分）
+  if (props.agv2?.enabled) {
+    const b = props.agv2
+    const [bx, by] = m2p(b.x, b.y)
+    const yawB = (b.yaw * Math.PI) / 180
+    if (night) {
+      ctx.fillStyle = 'rgba(64,220,180,0.22)'
+      ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.save()
+    ctx.translate(bx, by)
+    ctx.rotate(-yawB)
+    ctx.fillStyle = night ? '#3fd6b0' : '#17b98c'
+    ctx.beginPath()
+    ctx.moveTo(12, 0); ctx.lineTo(-8, -8); ctx.lineTo(-8, 8); ctx.closePath()
+    ctx.fill()
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke()
+    ctx.restore()
+    ctx.fillStyle = '#17b98c'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'
+    ctx.fillText('2', bx, by - 15)
+    if (night) {
+      ctx.fillStyle = 'rgba(64,220,180,0.18)'
+      ctx.beginPath(); ctx.moveTo(bx, by)
+      ctx.arc(bx, by, 38, -yawB - Math.PI / 5, -yawB + Math.PI / 5)
+      ctx.closePath(); ctx.fill()
+    }
   }
 }
 
@@ -342,7 +376,7 @@ onMounted(() => {
   draw()
   timer = setInterval(draw, 80) // 无人机旋翼/脉冲动画
 })
-  watch(() => [props.scene, props.agv, props.drone, props.routeProgress, props.showAnomalies, props.anomalies, props.route, props.night, props.baseWidth], draw, { deep: true })
+  watch(() => [props.scene, props.agv, props.agv2, props.drone, props.routeProgress, props.showAnomalies, props.anomalies, props.route, props.night, props.baseWidth], draw, { deep: true })
 onBeforeUnmount(() => clearInterval(timer))
 
 // 点击检测：命中异常点 → 弹证据

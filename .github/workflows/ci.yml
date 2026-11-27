@@ -82,6 +82,10 @@ jobs:
         run: |
           set -o pipefail
           uv run python test_agent_stream.py 2>&1 | tee /tmp/t7.log || { { echo '## test_agent_stream 失败'; tail -40 /tmp/t7.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+      - name: 双车协同验证
+        run: |
+          set -o pipefail
+          uv run python test_fleet.py 2>&1 | tee /tmp/t10.log || { { echo '## test_fleet 失败'; tail -30 /tmp/t10.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: 雨天自适应验证
         run: |
           set -o pipefail
