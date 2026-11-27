@@ -17,6 +17,7 @@
         <div class="greet-tags">
           <span>🤖 AI Agent 驱动</span>
           <span>📋 发现 → 处置 → 报告 全闭环</span>
+          <span v-if="weather !== 'clear'" class="greet-weather" :class="weather">{{ weather === 'storm' ? '🌧 大雨模式已启用：不判缺水与烟头，重点看积水内涝' : '🌦 小雨模式已启用：烟头只查遮蔽处，不判植被缺水' }}</span>
           <span>🔓 {{ modelConfigured ? '大模型已连接' : '开箱即用 · 填 Key 解锁大模型' }}</span>
         </div>
       </div>
@@ -83,6 +84,7 @@ const props = defineProps({
   sceneName: { type: String, default: '—' },
   sceneCount: { type: Number, default: 0 },
   stats: { type: Object, default: () => ({ pending: 0, processing: 0, resolved: 0, total: 0 }) },
+  weather: { type: String, default: 'clear' },
   battery: { type: Number, default: 96 },
   phase: { type: String, default: 'idle' },
   recentLogs: { type: Array, default: () => [] },
@@ -128,6 +130,8 @@ const phaseText = computed(() => ({
 .greet-status.warn b { text-shadow: 0 0 10px rgba(230,162,60,.4); }
 .greet-tags { display: flex; gap: 8px; flex-wrap: wrap; }
 .greet-tags span { font-size: 11.5px; color: #5a8ab8; background: rgba(236,245,255,.6); padding: 3px 10px; border-radius: 12px; }
+.greet-tags span.greet-weather { color: #b26a00; background: #fdf3e0; }
+.greet-tags span.greet-weather.storm { color: #8a5300; background: #fbeed6; }
 .greet-right { flex: none; display: flex; flex-direction: column; gap: 6px; align-items: center; }
 /* 四大模块大卡片（获奖作品风格：居中大图标 + 名称 + 一句话，干净统一） */
 .modules { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }

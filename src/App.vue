@@ -5,6 +5,24 @@
       <div class="logo">🛰 智巡 <span>SmartPatrol</span></div>
       <div class="subtitle">虚实结合的园区智能巡检平台</div>
       <div class="header-right">
+        <el-popover placement="bottom-end" :width="280" trigger="click">
+          <template #reference>
+            <button class="weather-badge" :class="weather">
+              {{ WEATHER_MODES[weather].icon }} {{ WEATHER_MODES[weather].label }}
+              <span class="wb-arrow">▾</span>
+            </button>
+          </template>
+          <div class="wb-pop">
+            <p class="wb-pop-title">作业环境</p>
+            <div class="wb-pop-row">
+              <button v-for="(w, k) in WEATHER_MODES" :key="k" class="wb-opt" :class="{ active: weather === k }" @click="weather = k">
+                <span>{{ w.icon }} {{ w.label }}</span>
+                <em v-if="weather === k">当前</em>
+              </button>
+            </div>
+            <p class="wb-pop-tip">{{ weather === 'clear' ? '正常作业：全类型判定，无人机按需复核。' : weatherHint }}</p>
+          </div>
+        </el-popover>
         <el-radio-group v-model="dsMode" size="small" @change="onModeChange">
           <el-radio-button value="sim">仿真模式</el-radio-button>
           <el-radio-button value="replay">回放模式</el-radio-button>
@@ -31,6 +49,7 @@
       :phase="phase"
       :recent-logs="homeRecentLogs"
       :model-configured="modelConfigured"
+      :weather="weather"
       @enter="onHomeEnter"
       @quick-patrol="onQuickPatrol"
     />
@@ -42,6 +61,7 @@
         <div class="screen-meta">
           <span class="chip">📍 {{ currentScene.name }}</span>
           <span class="chip">{{ modeName }}</span>
+          <span class="chip weather" :class="weather">{{ WEATHER_MODES[weather].icon }} {{ WEATHER_MODES[weather].label }}</span>
           <span class="chip clock">{{ clockText }}</span>
         </div>
         <div class="screen-stats">
@@ -751,6 +771,32 @@ html, body, #app { height: 100%; }
   margin-top: 8px; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5;
   color: #b26a00; background: #fdf6ec; border: 1px solid #f5dab1;
 }
+/* 顶栏环境徽章（全局开关：天气约束影响助手/报告/复核） */
+.weather-badge {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  border: 1px solid #dcdfe6; background: #fff; color: #606266;
+  border-radius: 14px; padding: 5px 12px; font-size: 12.5px; line-height: 1; font-family: inherit;
+  transition: all .18s;
+}
+.weather-badge:hover { border-color: #409eff; color: #409eff; }
+.weather-badge .wb-arrow { font-size: 10px; color: #909399; }
+.weather-badge.rain { color: #b26a00; border-color: #f0d9b8; background: #fdf6ec; }
+.weather-badge.storm { color: #8a5300; border-color: #e7c88f; background: #fbeed6; }
+.wb-pop-title { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #1f2d3d; }
+.wb-pop-row { display: flex; gap: 6px; }
+.wb-opt {
+  flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 4px;
+  border: 1px solid #dcdfe6; background: #fff; border-radius: 8px; padding: 7px 8px;
+  font-size: 12.5px; color: #606266; cursor: pointer; font-family: inherit;
+}
+.wb-opt.active { border-color: #409eff; color: #1f6ac0; background: #ecf5ff; }
+.wb-opt em { font-style: normal; font-size: 10px; color: #909399; }
+.wb-opt.active em { color: #1f6ac0; }
+.wb-pop-tip { margin: 8px 0 0; font-size: 11.5px; line-height: 1.6; color: #b26a00; background: #fdf6ec; border-radius: 6px; padding: 6px 8px; }
+/* 大屏环境 chip */
+.screen-meta .chip.weather { color: #e6b062; }
+.screen-meta .chip.weather.rain { color: #e6b062; }
+.screen-meta .chip.weather.storm { color: #f0b25a; background: rgba(240,178,90,.14); }
 /* 控制卡精简（评委反馈）：开始/复检并排，次要信息折叠收纳，状态合并一行 */
 .ctrl-btn-row { display: flex; gap: 8px; margin-top: 10px; }
 .ctrl-btn-row .el-button { margin: 0; flex: 1; white-space: normal; height: auto; min-height: 40px; padding-top: 7px; padding-bottom: 7px; }
