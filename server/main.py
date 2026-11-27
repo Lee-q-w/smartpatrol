@@ -330,6 +330,7 @@ AGENT_SYSTEM_PROMPT = """你是"智巡"智能巡检平台的语音助手"小巡"
 4. 处置方法、规范、平台用法类问题，优先依据知识库参考资料回答，保持简短；与参考资料无关的平台状态问题仍依据状态信息
 5. 不确定意图时友好追问，不做猜测动作
 6. 车队协同：平台支持双车协同（fleet=2，两台车按分区对半分并行巡逻）。用户说"两台车/双车/分头/并行"时，patrol 动作带 "fleet":2 并在回复里说明分工；只有 1 个分区时按单车执行
+6b. 热点优先：平台按历史工单统计点位热度，用户说"热点/高频点位/常出问题的地方"时，patrol 动作带 "mode":"point" 且 "hotspot":true，回复说明会先复查高频点位
 7. 雨天口径：雨天不是"同一批异常看不清"，而是判定项变了——大雨应判积水内涝（含绿地积水）、通道占用、垃圾堵塞排水口，不判植被缺水（雨天不存在）、不判未熄烟头（已浇灭）；小雨的烟头只查雨棚连廊门厅等遮蔽处；大雨不要输出 recheck 动作（无人机无法起飞），改为建议人工确认。被问"雨天怎么巡检/器械还要不要"时，依据知识库与约束如实说明（无人机停飞、车只跑关键点、固定摄像头与人工补位）
 
 知识库参考资料（来自本地巡检知识库检索，与问题相关时可引用）：
@@ -516,6 +517,7 @@ ACTIONS: []
 3. 处置方法、规范、平台用法类问题，优先依据知识库参考资料回答，保持简短；与参考资料无关的平台状态问题仍依据状态信息
 4. 不确定意图时友好追问，不做猜测动作
 5. 车队协同：用户说"两台车/双车/分头/并行"时，patrol 动作带 "fleet":2 并说明分工；只有 1 个分区按单车执行
+5b. 热点优先：用户说"热点/高频点位/常出问题的地方"时，patrol 动作带 "mode":"point" 且 "hotspot":true，回复说明会先复查高频点位
 6. 雨天口径：大雨应判积水内涝（含绿地积水）、通道占用、垃圾堵塞排水口，不判植被缺水、不判未熄火烟头（已浇灭）；小雨的烟头只查雨棚连廊门厅等遮蔽处；大雨不要输出 recheck 动作，改为建议人工确认；被问"雨天怎么巡检/器械还要不要"时，依据知识库与约束如实说明
 
 知识库参考资料（来自本地巡检知识库检索，与问题相关时可引用）：
@@ -536,21 +538,24 @@ def _local_fallback_actions(text: str, ctx: dict) -> list[dict]:
         return actions
     zones = [z for z in (ctx.get("zones") or []) if isinstance(z, dict)]
     # 巡逻
-    if any(k in t for k in ("巡逻", "巡检", "巡查", "检查", "体检", "详查", "查一查", "看一遍", "看下", "分头", "查全园")):
-        mode = "point" if ("详查" in t or "定点" in t) else ("sweep" if "环视" in t else "quick")
+    if any(k in t for k in ("巡逻", "巡检", "巡查", "检查", "体检", "详查", "查一查", "看一遍", "看下", "分头", "查全园", "热点", "高频")):
+        mode = "point" if ("详查" in t or "定点" in t or "热点" in t or "高频" in t) else ("sweep" if "环视" in t else "quick")
         # 双车协同意图：「两台车 / 双车 / 协同 / 分头 / 并行」→ fleet=2（分区对半分）
         dual = any(k in t for k in ("两台车", "双车", "协同", "分头", "并行", "两台"))
         zone_hit = next((z for z in zones if z.get("name") and z["name"].replace("分区", "") and z["name"].replace("分区", "") in t), None)
         args = {"zoneIds": [zone_hit["id"]], "mode": mode} if zone_hit else {"mode": mode}
         if dual:
             args["fleet"] = 2
+        # 热点意图：「热点 / 高频点位」→ 打开热点优先（先查历史高频点位）
+        if any(k in t for k in ("热点", "高频")):
+            args["hotspot"] = True
         actions.append({"type": "patrol", "args": args})
     # 报告 / 处置 / 复核 / 场景 / 数据源
     if any(k in t for k in ("报告", "导出", "PDF", "pdf")):
         actions.append({"type": "export_report", "args": {}})
     if any(k in t for k in ("处理完", "已处理", "标记", "解决")):
         actions.append({"type": "mark_resolved", "args": {"all": True}})
-    if any(k in t for k in ("复核", "复查")):
+    if any(k in t for k in ("复核", "复查")) and not any(k in t for k in ("热点", "高频")):
         # 雨天约束：大雨时无人机无法起飞，规则引擎同样不下发复核动作（与提示词约束一致）
         if (ctx.get("weather") or "clear") != "storm":
             actions.append({"type": "recheck", "args": {"all": True}})

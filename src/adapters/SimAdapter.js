@@ -186,6 +186,21 @@ export class SimAdapter {
       ? [zoneIds.filter((_, i) => i % 2 === 0), zoneIds.filter((_, i) => i % 2 === 1)]
       : [zoneIds]
     this.missions = groups.filter(g => g.length).map(g => buildMission(this.scene, g, mode))
+    // 热点优先：按传入的热点顺序重排定点详查的检查点（热点点位先查）
+    const hotspotOrder = Array.isArray(args.hotspots) ? args.hotspots : []
+    if (hotspotOrder.length && mode !== 'quick') {
+      const rank = (p) => {
+        // 优先按点位 id 匹配（placeId），兼容传入地点描述的情况
+        const i = hotspotOrder.indexOf(p.placeId)
+        if (i >= 0) return i
+        const j = hotspotOrder.indexOf(p.label)
+        return j < 0 ? hotspotOrder.length + 1 : j
+      }
+      for (const m of this.missions) {
+        if (!m.points?.length) continue
+        m.points = [...m.points].sort((a, b) => rank(a) - rank(b))
+      }
+    }
 
     // 回停靠点满电出发（每轮任务从 dock 起算）
     const cars = fleet === 2 ? [agv1, agv2] : [agv1]
@@ -199,6 +214,9 @@ export class SimAdapter {
     this._fleetDone = 0
 
     this._emit(EventType.PHASE, { phase: 'patrol' })
+    if (hotspotOrder.length && mode !== 'quick') {
+      this._emit(EventType.COMMAND_LOG, { text: `🔥 热点优先：先查历史高频点位 ${hotspotOrder.slice(0, 3).join('、')}${hotspotOrder.length > 3 ? ' 等' : ''}` })
+    }
     if (fleet === 2) {
       const g1 = groups[0].map(z => this._zoneName(z)).join('、')
       const g2 = groups[1].map(z => this._zoneName(z)).join('、')

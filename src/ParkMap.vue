@@ -21,6 +21,7 @@ const props = defineProps({
   routeProgress: { type: Number, default: 0 },   // 0~1 巡逻进度
   route: { type: Array, default: null },         // 当前规划路线（世界坐标折线）
   routes: { type: Array, default: () => [] },    // 多车路线：[{ points:[[x,y]...], color }]（优先于 route）
+  hotspots: { type: Array, default: () => [] },  // 热点：[{ x, y, count, score }] 热力层
   anomalies: { type: Array, default: () => [] }, // 异常列表（含位置）
   showAnomalies: { type: Boolean, default: false },
   droneTarget: { type: Object, default: null },  // 复核点 {x,y}
@@ -255,6 +256,28 @@ function draw() {
     }
   }
 
+  // 热点热力层（历史工单统计，越热越红越大）
+  if (props.hotspots?.length) {
+    const maxScore = Math.max(...props.hotspots.map(h => h.score || 0)) || 1
+    for (const h of props.hotspots) {
+      const [hx, hy] = m2p(h.x, h.y)
+      const k = Math.max(0.25, (h.score || 0) / maxScore)
+      const r = 16 + 26 * k
+      const g = ctx.createRadialGradient(hx, hy, 2, hx, hy, r)
+      g.addColorStop(0, `rgba(255,92,64,${0.42 * k + 0.14})`)
+      g.addColorStop(0.55, `rgba(255,140,60,${0.2 * k + 0.06})`)
+      g.addColorStop(1, 'rgba(255,170,90,0)')
+      ctx.fillStyle = g
+      ctx.beginPath(); ctx.arc(hx, hy, r, 0, Math.PI * 2); ctx.fill()
+      if (h.count >= 2) {
+        ctx.fillStyle = 'rgba(180,40,20,0.85)'
+        ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'
+        ctx.fillText(String(h.count), hx, hy - r + 9)
+        ctx.textAlign = 'left'
+      }
+    }
+  }
+
   // 异常标记（识别后显示，可点击查看证据）
   if (props.showAnomalies) {
     for (const a of props.anomalies) {
@@ -401,7 +424,7 @@ onMounted(() => {
   draw()
   timer = setInterval(draw, 80) // 无人机旋翼/脉冲动画
 })
-  watch(() => [props.scene, props.agv, props.agv2, props.drone, props.routeProgress, props.showAnomalies, props.anomalies, props.route, props.routes, props.night, props.baseWidth], draw, { deep: true })
+  watch(() => [props.scene, props.agv, props.agv2, props.drone, props.routeProgress, props.showAnomalies, props.anomalies, props.route, props.routes, props.hotspots, props.night, props.baseWidth], draw, { deep: true })
 onBeforeUnmount(() => clearInterval(timer))
 
 // 点击检测：命中异常点 → 弹证据

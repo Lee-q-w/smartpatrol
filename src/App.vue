@@ -116,6 +116,7 @@
           :route-progress="routeShown"
           :route="plannedRoutes.length ? null : plannedRoute"
           :routes="plannedRoutes"
+          :hotspots="hotspots"
           :anomalies="anomalies"
           :show-anomalies="anomalies.length > 0"
           :drone-target="droneTarget"
@@ -173,6 +174,13 @@
               <div class="fleet-row">
                 <el-switch v-model="fleetMode" size="small" active-text="双车协同" :disabled="!missionIdle || isReal || isReplay" />
                 <span class="fleet-hint">{{ fleetMode ? '两台车按分区并行，任务自动对半分' : '单台车执行全部任务' }}</span>
+              </div>
+            </div>
+            <div class="zone-row" style="margin-top: 10px">
+              <span class="zone-label">热点优先</span>
+              <div class="fleet-row">
+                <el-switch v-model="hotspotFirst" size="small" :disabled="!missionIdle || isReal || isReplay" />
+                <span class="fleet-hint">{{ hotspotHint }}</span>
               </div>
             </div>
             <div class="zone-row" style="margin-top: 10px">
@@ -318,6 +326,7 @@ import SplashScreen from './SplashScreen.vue'
 import { useDataSource, DataSourceMode } from './composables/useDataSource.js'
 import { useMcpBridge } from './composables/useMcpBridge'
 import { PATROL_MODES } from './parkData.js'
+import { archiveRound, computeHotspots, seedDemoHistoryIfEmpty, historyRecords } from './composables/useHotspots'
 import { DRONE_FRAME } from './parkData.js'
 const DRONE_FRAME_REF = DRONE_FRAME.ref   // 无人机俯拍复核帧（省赛实录，仅园区）
 import { allScenes, anomalyMeta, buildMission, anomaliesByZone } from './scenes/index.js'
@@ -341,6 +350,39 @@ const zoneIds = ref(['zone-c'])   // 巡逻范围：可多选/全园，保持点
 const patrolMode = ref('quick')  // 巡查方式：quick / point / sweep
 // 车队编组：双车协同（分区对半分，两台车并行巡逻）
 const fleetMode = ref(false)
+// 热点优先：按历史工单热度重排定点详查顺序（地图叠加热力层）
+const hotspotFirst = ref(false)
+const roundNo = ref(1)
+// 点位坐标（取当前场景异常真值点位；换场景自动失效）
+const hotspotPoints = computed(() => (currentScene.value.anomalies ?? [])
+  .filter(a => a.near)
+  .map(a => {
+    const dev = currentScene.value.devices.find(d => d.id === a.near)
+    // 与工单记录的 near 同源：优先取场景证据包的地点描述（如「bin-3 桶旁」）
+    const f = (currentScene.value.findings ?? []).find(x => x.type === a.type)
+    const near = f?.place ?? dev?.label ?? a.near
+    const x = dev ? dev.x : a.x + (a.w ?? 0) / 2
+    const y = dev ? dev.y : a.y + (a.h ?? 0) / 2
+    return { near, x, y }
+  }))
+const hotspots = computed(() => computeHotspots(hotspotPoints.value, 8))
+// 热点地点描述 → 设备 id（适配器按 placeId 排序检查点）
+const hotspotIds = computed(() => hotspots.value
+  .map(h => hotspotPoints.value.find(p => p.near === h.near))
+  .filter(Boolean)
+  .map(p => (currentScene.value.anomalies ?? []).find(a => {
+    const dev = currentScene.value.devices.find(d => d.id === a.near)
+    const f = (currentScene.value.findings ?? []).find(x => x.type === a.type)
+    return (f?.place ?? dev?.label ?? a.near) === p.near
+  })?.near)
+  .filter(Boolean))
+const demoHotspot = ref(false)   // 是否仍在使用初始示例历史（界面如实标注）
+const hotspotHint = computed(() => {
+  if (!hotspots.value.length) return '暂无历史工单，跑两轮巡检后自动生成热点'
+  const top = hotspots.value.slice(0, 3).map(h => `${h.near}×${h.count}`).join('、')
+  const tag = demoHotspot.value ? '（含示例数据）' : ''
+  return `历史高频点位：${top}${tag}${hotspotFirst.value ? '（本轮优先检查）' : ''}`
+})
 // 作业环境（雨天自适应：影响助手策略、无人机复核与报告标注）
 const weather = ref('clear')
 const WEATHER_MODES = {
@@ -436,6 +478,7 @@ async function onAssistantAction(a) {
         fleetMode.value = true
         if (zoneIds.value.length < 2) zoneIds.value = zoneList.value.map(z => z.id)
       }
+      if (args.hotspot) hotspotFirst.value = true
       startPatrol()
     } else if (type === 'switch_mode') {
       if (args.mode && ['sim', 'replay', 'real'].includes(args.mode) && args.mode !== dsMode.value) {
@@ -690,10 +733,30 @@ const homeLastReport = computed(() => {
 // 模型配置状态（首页徽标与问候条用；保存配置后刷新页面同步）
 const modelConfigured = ref(false)
 onMounted(async () => {
+  // 热点历史：首次使用写入 3 条示例（标注为演示数据），保证热力图开箱可见
+  demoHotspot.value = seedDemoHistoryIfEmpty([
+    { near: 'bin-3 桶旁', type: 'litter', label: '垃圾分类违规', round: 1 },
+    { near: 'bin-3 桶旁', type: 'litter', label: '垃圾分类违规', round: 2 },
+    { near: 'bin-3 桶旁', type: 'litter', label: '垃圾分类违规', round: 3 },
+    { near: 'bench-3 长椅旁', type: 'cigarette', label: '未熄烟头', round: 2 },
+    { near: 'bench-3 长椅旁', type: 'cigarette', label: '未熄烟头', round: 3 },
+    { near: 'lawn-sw 草坪', type: 'dry', label: '植被缺水', round: 3 },
+  ])
+  roundNo.value = (historyRecords().reduce((m, r) => Math.max(m, r.round ?? 0), 0) || 0) + 1
   try {
     const r = await fetch(`${API}/api/config/model`, { signal: AbortSignal.timeout(3000) })
     if (r.ok) modelConfigured.value = !!(await r.json()).configured
   } catch { /* 后端离线按未配置处理 */ }
+})
+
+// 每轮出报告后归档工单（供热点统计；同轮同点位去重）
+watch(phase, (v) => {
+  if (v !== 'report') return
+  const items = anomalies.value.map(a => ({ near: a.near, type: a.type, label: a.label }))
+  if (!items.length) return
+  archiveRound(items, roundNo.value)
+  roundNo.value += 1
+  demoHotspot.value = false   // 已有真实工单入库，不再标注示例
 })
 
 function onHomeEnter(v) {
@@ -716,6 +779,8 @@ function startPatrol() {
   dispatch('patrol', {
     zoneIds: zoneIds.value, mode: patrolMode.value,
     fleet: fleetMode.value && !isReplay.value && !isReal.value ? 2 : 1,
+    // 热点优先：把历史高频点位（映射为设备 id）传给适配器，定点详查会先查热点
+    hotspots: hotspotFirst.value ? hotspotIds.value : undefined,
   })
   // 雨天作业：把降级策略写进命令流，让过程可追溯（也便于报告与答辩说明）
   if (weather.value === 'storm') {
