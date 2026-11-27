@@ -284,6 +284,52 @@ async def recognize(file: UploadFile = File(...)):
     return result
 
 
+
+
+SUMMARY_SYSTEM_PROMPT = """你是园区智能巡检平台的报告总结助手。根据本轮巡检数据写一段给物业管理者看的「总结与建议」。
+要求：
+1. 120 字以内，两到三句话，分点分段不使用 markdown
+2. 第一句概括发现与处置进度（数字必须与数据一致，不要编造）
+3. 指出风险最集中的 1-2 类异常及其位置
+4. 给出一条可执行建议（派单/复核/加密巡查任选其一）
+5. 若作业环境非晴天，用半句话点明环境对判读的影响
+只输出总结正文，不要标题。"""
+
+async def _gen_report_summary(data: dict) -> tuple[str, str] | None:
+    """调模型生成报告总结；未配置模型/调用失败返回 None（走规则模板降级）"""
+    if not (CFG.get("api_key") and CFG.get("base_url")):
+        return None
+    findings = data.get("findings") or []
+    digest = {
+        "场景": data.get("sceneName"), "范围": data.get("scope"), "作业环境": data.get("weather", "晴"),
+        "异常": [{"类型": f.get("label"), "位置": f.get("near"),
+                 "把握度": f.get("confidence"), "工单": (f.get("handle") or {}).get("status", "pending")}
+                for f in findings],
+    }
+    payload = {
+        "model": CFG.get("model", "agnes-3.0-flash"),
+        "messages": [
+            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(digest, ensure_ascii=False)},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 400,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"{CFG['base_url'].rstrip('/')}/chat/completions",
+                json=payload, headers={"Authorization": f"Bearer {CFG['api_key']}"},
+            )
+            r.raise_for_status()
+            text = (r.json()["choices"][0]["message"]["content"] or "").strip()
+        if text:
+            return ("AI 巡检总结与建议", text[:500])
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 # ---------- 巡检报告导出（PDF，reportlab，无需模型 key） ----------
 @app.post("/api/report/export")
 async def export_report(data: dict):
@@ -295,6 +341,9 @@ async def export_report(data: dict):
             v = f.get(k)
             if v and (not isinstance(v, str) or len(v) > 4 * 1024 * 1024):
                 raise HTTPException(400, f"照片 {k} 数据过大（≤4MB base64）")
+    # AI 总结段：模型可用时生成「本轮总结与建议」，失败降级规则模板（report_pdf 内置）
+    if not data.get("aiSummary") and findings:
+        data["aiSummary"] = await _gen_report_summary(data)
     try:
         pdf = build_report_pdf(data)
     except Exception as e:  # noqa: BLE001

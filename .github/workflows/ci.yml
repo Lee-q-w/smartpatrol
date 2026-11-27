@@ -82,6 +82,10 @@ jobs:
         run: |
           set -o pipefail
           uv run python test_agent_stream.py 2>&1 | tee /tmp/t7.log || { { echo '## test_agent_stream 失败'; tail -40 /tmp/t7.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+      - name: 报告 AI 总结验证
+        run: |
+          set -o pipefail
+          uv run python test_summary.py 2>&1 | tee /tmp/t12.log || { { echo '## test_summary 失败'; tail -30 /tmp/t12.log; } >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: 热点自适应验证
         run: |
           set -o pipefail

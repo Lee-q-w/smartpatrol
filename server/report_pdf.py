@@ -90,6 +90,35 @@ def _photo_flowable(photo_b64: str, max_w=80 * mm, max_h=52 * mm):
         return None
 
 
+
+
+def _fallback_summary(data: dict, findings: list) -> tuple[str, str]:
+    """规则引擎总结：模型不可用时的降级文案（数字与结论严格来自数据）"""
+    if not findings:
+        return ("", "")
+    resolved = sum(1 for f in findings if (f.get("handle") or {}).get("status") == "resolved")
+    processing = sum(1 for f in findings if (f.get("handle") or {}).get("status") == "processing")
+    pending = len(findings) - resolved - processing
+    type_count: dict = {}
+    for f in findings:
+        k = f.get("label") or f.get("type") or "未知"
+        type_count[k] = type_count.get(k, 0) + 1
+    top = sorted(type_count.items(), key=lambda kv: -kv[1])[:3]
+    top_txt = chr(12289).join(f"{k} {v} 处" for k, v in top)
+    weather = data.get("weather")
+    nl = chr(10)
+    parts = [
+        f"本轮共发现 {len(findings)} 处异常，其中 {top_txt}。处置进度：已处置 {resolved} 处、处理中 {processing} 处、待处理 {pending} 处。",
+    ]
+    if weather and weather != "晴":
+        parts.append(f"本报告生成于{weather}环境下的降级作业，判定项已按雨天口径调整，请结合环境条件解读异常结论。")
+    if pending > 0:
+        parts.append(f"建议：优先跟进 {pending} 处待处理工单，高把握异常可在复核确认后立即派单。")
+    elif resolved == len(findings):
+        parts.append("建议：本轮工单已全部闭环，可在高频点位安排下一轮定点详查。")
+    return ("AI 巡检总结与建议", nl.join(parts))
+
+
 def build_report_pdf(data: dict) -> bytes:
     """
     data: {
@@ -218,6 +247,15 @@ def build_report_pdf(data: dict) -> bytes:
                 ]))
                 flow.append(Spacer(1, 2 * mm))
                 flow.append(photo_tbl)
+
+    # ---- AI 总结段（模型不可用时降级为规则模板） ----
+    summary_title, summary_text = data.get("aiSummary") or _fallback_summary(data, findings_all)
+    if summary_text:
+        flow.append(Spacer(1, 6 * mm))
+        flow.append(Paragraph(_esc(summary_title), S["h2"]))
+        flow.append(Spacer(1, 1.5 * mm))
+        flow.append(Paragraph(_esc(summary_text).replace("\n", "<br/>"), ParagraphStyle(
+            "summary", parent=S["body"], leading=17, textColor=colors.HexColor("#2c3e50"))))
 
     # ---- 页脚声明 ----
     flow.append(Spacer(1, 8 * mm))
