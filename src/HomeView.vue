@@ -65,6 +65,16 @@
         </div>
       </div>
 
+      <!-- 上次报告（闭环归档：发现→处置→报告→可再取） -->
+      <div v-if="lastReport" class="ov-lastreport">
+        <span class="lr-icon">📄</span>
+        <div class="lr-main">
+          <b>上次报告</b>
+          <span class="lr-sub">{{ lastReport.time }} · {{ lastReport.scene }} · 发现 {{ lastReport.count }} 处异常</span>
+        </div>
+        <button class="lr-btn" @click="$emit('re-export')">再导出一份</button>
+      </div>
+
       <!-- 最新情报（CTA 已上移至顶部问候条，情报流拉满宽度） -->
       <div class="ov-feed">
         <span class="ov-feed-title">最新情报</span>
@@ -85,12 +95,13 @@ const props = defineProps({
   sceneCount: { type: Number, default: 0 },
   stats: { type: Object, default: () => ({ pending: 0, processing: 0, resolved: 0, total: 0 }) },
   weather: { type: String, default: 'clear' },
+  lastReport: { type: Object, default: null },
   battery: { type: Number, default: 96 },
   phase: { type: String, default: 'idle' },
   recentLogs: { type: Array, default: () => [] },
   modelConfigured: { type: Boolean, default: false },
 })
-defineEmits(['enter', 'quick-patrol'])
+defineEmits(['enter', 'quick-patrol', 're-export'])
 
 // 按时间问候（首页第一眼是“服务你”而不是重复品牌）
 const greeting = computed(() => {
@@ -164,6 +175,20 @@ const phaseText = computed(() => ({
 @keyframes ov-pulse { 50% { box-shadow: 0 0 14px rgba(230,162,60,.4); } }
 .ov-sub { font-size: 11.5px; color: #c0c4cc; }
 .ov-feed { margin-top: 14px; background: #fff; border: 1px solid #ebeef5; border-radius: 10px; padding: 10px 14px; }
+/* 上次报告快捷条（闭环归档入口） */
+.ov-lastreport {
+  display: flex; align-items: center; gap: 12px; margin-top: 12px;
+  background: #f4f9f6; border: 1px solid #d6ecd9; border-radius: 10px; padding: 9px 14px;
+}
+.ov-lastreport .lr-icon { font-size: 20px; }
+.ov-lastreport .lr-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.ov-lastreport .lr-main b { font-size: 13px; color: #2f6b3a; }
+.ov-lastreport .lr-sub { font-size: 12px; color: #7ba585; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-lastreport .lr-btn {
+  border: 1px solid #c3e0c8; background: #fff; color: #2f6b3a; border-radius: 8px;
+  padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: inherit; transition: all .18s; white-space: nowrap;
+}
+.ov-lastreport .lr-btn:hover { background: #ecf7ef; }
 .ov-feed-title { font-size: 12px; color: #909399; }
 .ov-feed-list { margin-top: 6px; }
 .ov-feed-line { font-size: 12.5px; color: #606266; padding: 3px 0; border-bottom: 1px dashed #ebeef5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

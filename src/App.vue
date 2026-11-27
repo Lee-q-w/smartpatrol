@@ -50,8 +50,10 @@
       :recent-logs="homeRecentLogs"
       :model-configured="modelConfigured"
       :weather="weather"
+      :last-report="homeLastReport"
       @enter="onHomeEnter"
       @quick-patrol="onQuickPatrol"
+      @re-export="exportReport"
     />
 
     <!-- 视图：值守大屏（值班室全屏模式） -->
@@ -613,6 +615,22 @@ const homeStats = computed(() => ({
 }))
 const homeRecentLogs = computed(() => cmdLog.value.slice(-3).reverse().map(l => l.text))
 
+// —— 首页：上次报告快捷卡（闭环归档：发现→处置→报告→可再取） ——
+const lastExport = ref(null)   // { ts, count, scene }
+function rememberExport(n) {
+  lastExport.value = { ts: Date.now(), count: n, scene: currentScene.value.name }
+}
+const homeLastReport = computed(() => {
+  if (!lastExport.value) return null
+  const d = new Date(lastExport.value.ts)
+  const pad = n => String(n).padStart(2, '0')
+  return {
+    time: `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`,
+    count: lastExport.value.count,
+    scene: lastExport.value.scene,
+  }
+})
+
 // 模型配置状态（首页徽标与问候条用；保存配置后刷新页面同步）
 const modelConfigured = ref(false)
 onMounted(async () => {
@@ -757,6 +775,7 @@ async function exportReport() {
     a.download = `smartpatrol-report-${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}.pdf`
     a.click()
     URL.revokeObjectURL(a.href)
+    rememberExport(findings.length)
     ElMessage.success(`巡检报告已导出（${findings.length} 处异常）`)
   } catch (e) {
     ElMessage.error('导出失败：' + e.message + '（请确认识别服务已启动）')
