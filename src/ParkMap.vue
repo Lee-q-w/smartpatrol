@@ -20,6 +20,7 @@ const props = defineProps({
   drone: { type: Object, default: () => ({ x: 30, y: 20, active: false }) },
   routeProgress: { type: Number, default: 0 },   // 0~1 巡逻进度
   route: { type: Array, default: null },         // 当前规划路线（世界坐标折线）
+  routes: { type: Array, default: () => [] },    // 多车路线：[{ points:[[x,y]...], color }]（优先于 route）
   anomalies: { type: Array, default: () => [] }, // 异常列表（含位置）
   showAnomalies: { type: Boolean, default: false },
   droneTarget: { type: Object, default: null },  // 复核点 {x,y}
@@ -209,25 +210,49 @@ function draw() {
     ctx.fillText('dock', dx, dy + 22); ctx.textAlign = 'left'
   }
 
-  // 巡逻路线
-  const path = routePath(props.routeProgress)
-  if (path.length > 1) {
-    ctx.strokeStyle = C.route; ctx.lineWidth = night ? 3.5 : 3
-    if (night) { ctx.shadowColor = 'rgba(64,200,255,0.8)'; ctx.shadowBlur = 8 }
-    ctx.setLineDash([])
-    ctx.beginPath(); ctx.moveTo(path[0][0], path[0][1])
-    for (let i = 1; i < path.length; i++) ctx.lineTo(path[i][0], path[i][1])
-    ctx.stroke()
-    ctx.shadowBlur = 0
-    // 走过的路线点
-    ctx.fillStyle = C.routeDot
-    const routePts = props.route ?? []
-    routePts.forEach((p, i) => {
-      if (i / Math.max(1, routePts.length - 1) <= props.routeProgress + 0.02) {
-        const [wx, wy] = m2p(p[0], p[1])
-        ctx.beginPath(); ctx.arc(wx, wy, 4, 0, Math.PI * 2); ctx.fill()
-      }
-    })
+  // 多车协同：每台车各自一条路线（分色虚线），避免与实际行驶轨迹错位
+  if (props.routes?.length) {
+    for (const r of props.routes) {
+      const pts = (r.points ?? []).map(p => [p[0] * S(), p[1] * S()])
+      if (pts.length < 2) continue
+      ctx.save()
+      ctx.strokeStyle = r.color
+      ctx.globalAlpha = night ? 0.85 : 0.7
+      ctx.lineWidth = night ? 3 : 2.5
+      ctx.setLineDash([9, 7])
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1])
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.fillStyle = r.color
+      pts.forEach((pt, i) => {
+        if (i === 0 || i === pts.length - 1) {
+          ctx.beginPath(); ctx.arc(pt[0], pt[1], 4, 0, Math.PI * 2); ctx.fill()
+        }
+      })
+      ctx.restore()
+    }
+  } else {
+    // 巡逻路线（单车）
+    const path = routePath(props.routeProgress)
+    if (path.length > 1) {
+      ctx.strokeStyle = C.route; ctx.lineWidth = night ? 3.5 : 3
+      if (night) { ctx.shadowColor = 'rgba(64,200,255,0.8)'; ctx.shadowBlur = 8 }
+      ctx.setLineDash([])
+      ctx.beginPath(); ctx.moveTo(path[0][0], path[0][1])
+      for (let i = 1; i < path.length; i++) ctx.lineTo(path[i][0], path[i][1])
+      ctx.stroke()
+      ctx.shadowBlur = 0
+      // 走过的路线点
+      ctx.fillStyle = C.routeDot
+      const routePts = props.route ?? []
+      routePts.forEach((p, i) => {
+        if (i / Math.max(1, routePts.length - 1) <= props.routeProgress + 0.02) {
+          const [wx, wy] = m2p(p[0], p[1])
+          ctx.beginPath(); ctx.arc(wx, wy, 4, 0, Math.PI * 2); ctx.fill()
+        }
+      })
+    }
   }
 
   // 异常标记（识别后显示，可点击查看证据）
@@ -376,7 +401,7 @@ onMounted(() => {
   draw()
   timer = setInterval(draw, 80) // 无人机旋翼/脉冲动画
 })
-  watch(() => [props.scene, props.agv, props.agv2, props.drone, props.routeProgress, props.showAnomalies, props.anomalies, props.route, props.night, props.baseWidth], draw, { deep: true })
+  watch(() => [props.scene, props.agv, props.agv2, props.drone, props.routeProgress, props.showAnomalies, props.anomalies, props.route, props.routes, props.night, props.baseWidth], draw, { deep: true })
 onBeforeUnmount(() => clearInterval(timer))
 
 // 点击检测：命中异常点 → 弹证据

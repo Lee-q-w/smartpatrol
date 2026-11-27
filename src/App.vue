@@ -77,7 +77,7 @@
       <div class="screen-map">
         <ParkMap
           :scene="currentScene" :night="true" :agv="devices.agv" :agv2="devices.agv2" :drone="devices.drone"
-          :route-progress="routeShown" :route="plannedRoute" :anomalies="anomalies"
+          :route-progress="routeShown" :route="plannedRoutes.length ? null : plannedRoute" :routes="plannedRoutes" :anomalies="anomalies"
           :show-anomalies="anomalies.length > 0" :drone-target="droneTarget"
           :base-width="1400" @anomaly-click="openEvidence" />
         <div class="screen-side">
@@ -114,7 +114,8 @@
           :agv2="devices.agv2"
           :drone="devices.drone"
           :route-progress="routeShown"
-          :route="plannedRoute"
+          :route="plannedRoutes.length ? null : plannedRoute"
+          :routes="plannedRoutes"
           :anomalies="anomalies"
           :show-anomalies="anomalies.length > 0"
           :drone-target="droneTarget"
@@ -552,6 +553,17 @@ const recheckBtn = computed(() => {
 const plannedRoute = computed(() => {
   if (isReplay.value) return adapter.value?.replayRoute ?? []
   return buildMission(currentScene.value, zoneIds.value, patrolMode.value).route
+})
+
+// 双车协同：按与适配器一致的奇偶拆分，为每台车各画一条路线（避免两车偏离同一条线）
+const plannedRoutes = computed(() => {
+  if (isReplay.value || !fleetMode.value || zoneIds.value.length < 2) return []
+  const even = zoneIds.value.filter((_, i) => i % 2 === 0)
+  const odd = zoneIds.value.filter((_, i) => i % 2 === 1)
+  return [
+    { points: buildMission(currentScene.value, even, patrolMode.value).route, color: '#1f8fff' },
+    { points: buildMission(currentScene.value, odd, patrolMode.value).route, color: '#17b98c' },
+  ]
 })
 
 function toggleZone(id) {
